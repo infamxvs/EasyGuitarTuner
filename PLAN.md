@@ -92,7 +92,7 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
   - **Hold time** la linistire (RAW=0 si SMOOTH>0): incrementeaza `_silenceCount`. Cat timp e sub `HoldCycles = 3`, SMOOTH ramane neschimbat (acul si afisajul stau fixe pe ultima nota). La al 3-lea ciclu de liniste, reseteaza `SMOOTH = 0`, `_pendingFrequency = 0`, `_silenceCount = 0`. Crucial pentru coardele inalte (B3, E4) cu decay fizic scurt.
   - Cost: ~200ms latenta la inceputul fiecarei note noi (confirmare) + ~400ms persistenta vizuala dupa atenuare (2 cicluri vizibile inainte de reset). Castig: glitch-uri eliminate si afisare suficient de lunga pentru toate cele 6 coarde (E4 trece de la ~200ms la ~1.2s afisaj).
 - Logheaza pentru fiecare ciclu si **RMS-ul real** (util pentru diagnoza)
-- `MapCentsToAngle`: mapeaza cents [-100, +100] la unghi ac [-90, +90] grade
+- `MapCentsToAngle`: clampeaza cents la [-50, +50] si mapeaza la unghi ac [-50, +50] grade (aliniat la marcajele cadranului)
 - Orchestreaza `PitchDetectorService`, `NoteAnalyzerService` si `ISessionLogger`
 
 ---
@@ -104,7 +104,7 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 - Imaginile sunt incarcate o singura data ca `SKImage` prin `FileSystem.OpenAppPackageFileAsync` (pixel-perfect, fara rescalare DPI), apoi cache-uite
 - **Fundal**: scalat cu `scale = min(width/bgW, height/bgH)` si centrat (fit "contain", fara distorsiune); raportul imaginii ≈ raportul ferestrei deci umple ecranul
 - **Ac**: desenat peste fundal, ancorat la baza lui (jos-centru = pixel `(needleW/2, needleH)`). Transformarea: `Translate(pivot)` → `Scale(scale)` → `RotateDegrees(NeedleAngle)` → `DrawImage(needle, -needleW/2, -needleH)`. Rotatia se face exact in jurul bazei acului
-- **Pivot** exprimat ca fractii din imaginea de fundal, reglabile vizual: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` (estimari de start, de calibrat)
+- **Pivot** exprimat ca fractii din imaginea de fundal: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` (valori validate vizual — acul sta corect pe pivotul cadranului)
 - Sampling de calitate (`SKSamplingOptions` Linear/Linear)
 - Singura proprietate bindabila: `NeedleAngle`
 
@@ -226,7 +226,7 @@ Deoarece proiectul ruleaza **neimpachetat** (`WindowsPackageType=None`), permisi
 |--------|----------|-----|
 | `Plugin.Maui.Audio` | 4.0.0 | Streaming audio de la microfon (`IAudioStreamer`) |
 | `MathNet.Numerics` | 5.0.0 | Calculeaza FFT (Fourier.Forward) |
-| `SkiaSharp.Views.Maui.Controls` | 3.119.4 | Deseneaza interfata grafica (ac, arc) |
+| `SkiaSharp.Views.Maui.Controls` | 3.119.4 | Deseneaza grafica (fundal + ac din imagini, rotire ac) |
 | `Microsoft.Maui.Controls` | 10.0.20 | Framework-ul MAUI |
 
 ---
@@ -282,10 +282,10 @@ Folderele excluse din backup (`bin`, `obj`, `.vs`, `.git`, `packages`) se regene
   2. **EMA** (`smooth = smooth * 0.6 + raw * 0.4`) pentru variatii sub 15% — raspuns rapid la vibrato/drift fara saltari.
   3. **Hold time** (`HoldCycles = 3`) cand RAW=0: SMOOTH ramane neschimbat pentru 2 cicluri vizibile (~400ms), apoi al 3-lea ciclu reseteaza la 0. Crucial pentru coardele inalte (B3, E4) care au decay fizic foarte scurt — fara hold, E4 ar dispărea instant dupa 1 ciclu de detectie.
 - **Sample rate asumat**: 44100 Hz pe toate platformele. Daca microfonul Windows ruleaza nativ la 48000 Hz si plugin-ul nu onoreaza setarea, frecventele vor aparea cu ~8.8% mai mari decat real — verificabil din `tuner-session.log` (CENTS constant mare la o coarda cunoscuta).
-- **Range ac ±50 centi**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 si mapeaza la ±50° (`MaxCentsForNeedle = 50`, `MaxNeedleAngleDegrees = 50`). Valori de calibrat impreuna cu fractiile pivotului pentru a alinia acul exact pe marcaje.
+- **Range ac ±50 centi**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 si mapeaza la ±50° (`MaxCentsForNeedle = 50`, `MaxNeedleAngleDegrees = 50`), aliniat la marcaje.
 - **Grafica pe imagini (AnalogMeterView)**: in loc de desen procedural, controlul incarca `background.png` si `needle.png` din `Resources/Raw` ca `SKImage` (o singura data, cache). Fundalul e scalat "contain" si centrat. Acul e desenat peste fundal cu transformarea `Translate(pivot) → Scale(scale) → RotateDegrees(NeedleAngle) → DrawImage(needle, -needleW/2, -needleH)`, deci pivotul de rotatie e baza acului. Pozitia pivotului in cadran = `PivotXFraction`/`PivotYFraction` (fractii din imagine), reglabile vizual.
 - **De ce Resources/Raw si nu MauiImage**: imaginile trebuie pastrate la rezolutia reala (acul e deja la scara corecta fata de fundal). `MauiImage` ar aplica rescalare dupa DPI si ar strica raportul. `MauiAsset` (folderul `Resources/Raw`) pastreaza fisierul pixel-perfect, incarcabil cu `FileSystem.OpenAppPackageFileAsync`.
-- **Calibrare pivot/unghi**: `PivotYFraction` (~0.56) si `MaxNeedleAngleDegrees` (50) sunt estimari de start. Se rafineaza prin rulari repetate pana cand baza acului sta pe pivotul fizic al cadranului si varful atinge `±50` pe marcaje.
+- **Calibrare pivot/unghi**: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` si `MaxNeedleAngleDegrees = 50` sunt valorile validate vizual — baza acului sta pe pivotul fizic al cadranului si varful atinge `±50` pe marcaje. Daca se schimba imaginea de fundal, aceste valori trebuie recalibrate.
 - **Hold time vs decay fizic**: coardele subtiri (B3 = 247 Hz, E4 = 330 Hz) au timp de decay fizic de ~3x mai scurt decat coardele groase (E2 = 82 Hz). Fara hold time, E4 ar fi afisat doar 200ms inainte ca RMS sa scada sub prag. Combinatia "prag RMS scazut la 0.003 + hold de 3 cicluri" extinde afisarea E4 de la ~200ms la ~1.2s, suficient pentru utilizator sa citeasca cents-urile.
 - **Raport de aspect 19.5:9**: aplicatia este blocata in portret pe Android (atribut `ScreenOrientation.Portrait` in `MainActivity`) si iOS (doar `UIInterfaceOrientationPortrait` in `Info.plist`). Pe Windows, fereastra este fixata la 249×540 pixeli (540/249 ≈ 2.169 ≈ 19.5:9) prin `CreateWindow` in `App.xaml.cs` cu `MinimumWidth = MaximumWidth = 249` si `MinimumHeight = MaximumHeight = 540`. Utilizatorul nu poate redimensiona fereastra pe Windows.
 - **Cum sa setezi NavBarIsVisible**: pentru a ascunde bara purpurie cu titlul aplicatiei (cand pagina e gazduita in Shell), foloseste `Shell.NavBarIsVisible="False"` pe `ContentPage` in XAML. Important pentru un look complet curat fara header.
