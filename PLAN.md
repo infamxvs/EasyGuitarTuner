@@ -16,7 +16,7 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
     -> PitchDetectorService     (RMS gate + Hann + FFT + HPS via MathNet -> Hz)
     -> TunerViewModel           (confirmare 2 cicluri + EMA + hold time -> NoteResult)
     -> NoteAnalyzerService      (nota + cents deviation)
-    -> MainPage                 (AnalogMeterView + Label Hz + Label nota/cents)
+    -> MainPage                 (AnalogMeterView + afisaj 3 coloane: STANDARD/440Hz | nota+Hz | cents/CENTS)
     -> FileSessionLogger        (tuner-session.log)
 ```
 
@@ -80,11 +80,10 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 ### ViewModel
 
 **`ViewModels/TunerViewModel.cs`**
-- Proprietati bindabile: `FrequencyText`, `StatusText`, `NeedleAngle`, `ToggleButtonText`, `IsListening`
-- `StatusText`:
-  - Cand exista semnal: `"B3   +4.9 cents"` (nota + octava + deviatie)
-  - Cand nu exista semnal: `"Incepeti sa cantati"` daca asculta, `"Apasati Start"` altfel
+- Proprietati bindabile: `NoteText`, `OctaveText`, `FrequencyText`, `CentsText`, `NeedleAngle`, `ToggleButtonText`, `IsListening`
+- `NoteText` / `OctaveText`: nota detectata si octava (ex: `"E"` + `"2"`); cand nu exista semnal `NoteText = "—"`, `OctaveText = ""`
 - `FrequencyText`: ex `"247.6 Hz"` sau `"0.0 Hz"` cand nu se detecteaza
+- `CentsText`: deviatia rotunjita la intreg cu semn (ex: `"-1"`, `"+4"`); gol cand nu exista semnal
 - Se aboneaza la `OnAudioCaptured` din `AudioCaptureService`
 - Strategie de smoothing pe frecventa detectata (confirmare + EMA + hold):
   - **Cold start / Saltea mare** (`|RAW - SMOOTH| / SMOOTH > 0.15`, JumpThreshold=0.15): noul RAW intra in `_pendingFrequency` — acul NU se misca inca. Doar daca urmatorul ciclu confirma cu o frecventa similara (`< 5%` diferenta, SimilarityThreshold=0.05), `SMOOTH = RAW` (snap). Filtreaza glitch-urile izolate de 1 ciclu.
@@ -115,9 +114,12 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 **`MainPage.xaml`** + **`MainPage.xaml.cs`**
 - `AbsoluteLayout` cu pozitionare proportionala peste imaginea de fundal
 - `AnalogMeterView` acopera intregul ecran (`LayoutBounds="0,0,1,1"`)
-- Frecventa + status (culori warm `#F5E6C8` / `#C9B68A`) plasate peste dreptunghiul negru de afisaj din cadran (`LayoutBounds="0.5,0.69,0.7,0.12"`)
+- Afisaj pe 3 coloane (`Grid ColumnDefinitions="*,2*,*"`, `LayoutBounds="0.5,0.73,0.85,0.12"`) plasat peste caseta de afisaj care e deja desenata in imaginea de fundal. Coloana centrala e de 2x latimea laterelelor (raport 1:2:1) ca sa coincida cu caseta neagra; coloanele laterale au `Margin="0,6,0,0"`:
+  - **Stanga**: eticheta `STANDARD` + valoare statica `440 Hz` (referinta acordaj, culoare `#C9B68A`, fonturi 7 / 9)
+  - **Centru**: **doar text** (fara niciun chenar desenat) plasat peste caseta neagra din imagine — nota mare + octava ca subscript (`FormattedString` doua `Span`-uri, `#F2A640`, fonturi 34 / 16) si frecventa dedesubt (`#E8922E`, font 12)
+  - **Dreapta**: valoarea `CentsText` + eticheta `CENTS` (culoare `#C9B68A`, fonturi 11 / 7)
 - Buton Start / Stop in stil vintage (fundal `#3A2A18`, border `#8A6A3A`, text `#F5E6C8`) peste panoul de jos (`LayoutBounds="0.5,0.9,0.7,0.09"`)
-- Titlul aplicatiei este parte din imaginea de fundal (fara header XAML duplicat)
+- Titlul aplicatiei si caseta de afisaj sunt parte din imaginea de fundal (fara header XAML si fara `Border` desenat — peste fundal se aseaza doar text)
 
 ---
 
@@ -164,11 +166,11 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 | `Services/NoteAnalyzerService.cs` | Creat |
 | `Services/ISessionLogger.cs` | Creat |
 | `Services/FileSessionLogger.cs` | Creat |
-| `ViewModels/TunerViewModel.cs` | Modificat (smoothing + EMA + hold time; unghi ac ±50° pentru ±50 centi) |
+| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing + EMA + hold time; unghi ac ±50° pentru ±50 centi) |
 | `Controls/AnalogMeterView.cs` | Modificat (grafica pe imagini: fundal + ac rotit din `Resources/Raw`) |
-| `Resources/Raw/background.png` | Creat (fundal cadran VU, 900×1950) |
+| `Resources/Raw/background.png` | Creat (fundal cadran VU, 900×1950; include titlul si caseta neagra de afisaj desenate in imagine) |
 | `Resources/Raw/needle.png` | Creat (ac indicator, 20×284) |
-| `MainPage.xaml` | Modificat (AbsoluteLayout proportional peste imagine, stil vintage) |
+| `MainPage.xaml` | Modificat (afisaj pe 3 coloane `*,2*,*` la `0.5,0.73`; doar text peste caseta neagra din imagine, fara `Border`; etichete laterale culoare `#C9B68A`) |
 | `Services/PitchDetectorService.cs` | Modificat (prag RMS scazut la 0.003 pentru coarde subtiri) |
 | `MauiProgram.cs` | Modificat (fonts) |
 | `App.xaml.cs` | Modificat (DI + fereastra fixa 249x540 pe Windows) |
@@ -285,6 +287,7 @@ Folderele excluse din backup (`bin`, `obj`, `.vs`, `.git`, `packages`) se regene
 - **Range ac ±50 centi**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 si mapeaza la ±50° (`MaxCentsForNeedle = 50`, `MaxNeedleAngleDegrees = 50`), aliniat la marcaje.
 - **Grafica pe imagini (AnalogMeterView)**: in loc de desen procedural, controlul incarca `background.png` si `needle.png` din `Resources/Raw` ca `SKImage` (o singura data, cache). Fundalul e scalat "contain" si centrat. Acul e desenat peste fundal cu transformarea `Translate(pivot) → Scale(scale) → RotateDegrees(NeedleAngle) → DrawImage(needle, -needleW/2, -needleH)`, deci pivotul de rotatie e baza acului. Pozitia pivotului in cadran = `PivotXFraction`/`PivotYFraction` (fractii din imagine), reglabile vizual.
 - **De ce Resources/Raw si nu MauiImage**: imaginile trebuie pastrate la rezolutia reala (acul e deja la scara corecta fata de fundal). `MauiImage` ar aplica rescalare dupa DPI si ar strica raportul. `MauiAsset` (folderul `Resources/Raw`) pastreaza fisierul pixel-perfect, incarcabil cu `FileSystem.OpenAppPackageFileAsync`.
+- **Caseta de afisaj e parte din imagine**: noua imagine de fundal include deja caseta neagra de afisaj (si titlul) desenate. In XAML NU se mai deseneaza niciun `Border` — peste fundal se aseaza doar text (nota/frecventa centrate peste caseta neagra). Sursa imaginii editate e in `Images/background_1950_900.png`; pentru a o folosi se copiaza peste `Resources/Raw/background.png` (acelasi nume de asset folosit de `AnalogMeterView`). Daca pozitia casetei sau a cadranului se schimba la o editare viitoare, se recalibreaza `LayoutBounds` din `MainPage.xaml` (centrul randului de afisaj, acum `0.5,0.73`) si pivotul acului din `AnalogMeterView.cs`.
 - **Calibrare pivot/unghi**: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` si `MaxNeedleAngleDegrees = 50` sunt valorile validate vizual — baza acului sta pe pivotul fizic al cadranului si varful atinge `±50` pe marcaje. Daca se schimba imaginea de fundal, aceste valori trebuie recalibrate.
 - **Hold time vs decay fizic**: coardele subtiri (B3 = 247 Hz, E4 = 330 Hz) au timp de decay fizic de ~3x mai scurt decat coardele groase (E2 = 82 Hz). Fara hold time, E4 ar fi afisat doar 200ms inainte ca RMS sa scada sub prag. Combinatia "prag RMS scazut la 0.003 + hold de 3 cicluri" extinde afisarea E4 de la ~200ms la ~1.2s, suficient pentru utilizator sa citeasca cents-urile.
 - **Raport de aspect 19.5:9**: aplicatia este blocata in portret pe Android (atribut `ScreenOrientation.Portrait` in `MainActivity`) si iOS (doar `UIInterfaceOrientationPortrait` in `Info.plist`). Pe Windows, fereastra este fixata la 249×540 pixeli (540/249 ≈ 2.169 ≈ 19.5:9) prin `CreateWindow` in `App.xaml.cs` cu `MinimumWidth = MaximumWidth = 249` si `MinimumHeight = MaximumHeight = 540`. Utilizatorul nu poate redimensiona fereastra pe Windows.

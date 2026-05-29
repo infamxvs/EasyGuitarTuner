@@ -14,24 +14,67 @@
             AbsoluteLayout.LayoutFlags="All"
             NeedleAngle="{Binding NeedleAngle}" />
 
-        <VerticalStackLayout
-            AbsoluteLayout.LayoutBounds="0.5,0.69,0.7,0.12"
+        <Grid
+            AbsoluteLayout.LayoutBounds="0.5,0.73,0.85,0.12"
             AbsoluteLayout.LayoutFlags="All"
-            Spacing="2"
+            ColumnDefinitions="*,2*,*"
             VerticalOptions="Center">
 
-            <Label Text="{Binding FrequencyText}"
-                   HorizontalOptions="Center"
-                   FontSize="26"
-                   FontAttributes="Bold"
-                   TextColor="#F5E6C8" />
+            <VerticalStackLayout Grid.Column="0"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center"
+                                 Margin="0,6,0,0"
+                                 Spacing="0">
+                <Label Text="STANDARD"
+                       HorizontalOptions="Center"
+                       FontSize="7"
+                       TextColor="#C9B68A" />
+                <Label Text="440 Hz"
+                       HorizontalOptions="Center"
+                       FontSize="9"
+                       TextColor="#C9B68A" />
+            </VerticalStackLayout>
 
-            <Label Text="{Binding StatusText}"
-                   HorizontalOptions="Center"
-                   FontSize="14"
-                   TextColor="#C9B68A" />
+            <VerticalStackLayout Grid.Column="1"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center"
+                                 Spacing="-2">
+                <Label HorizontalOptions="Center">
+                    <Label.FormattedText>
+                        <FormattedString>
+                            <Span Text="{Binding NoteText}"
+                                  FontSize="34"
+                                  FontAttributes="Bold"
+                                  TextColor="#F2A640" />
+                            <Span Text="{Binding OctaveText}"
+                                  FontSize="16"
+                                  FontAttributes="Bold"
+                                  TextColor="#F2A640" />
+                        </FormattedString>
+                    </Label.FormattedText>
+                </Label>
+                <Label Text="{Binding FrequencyText}"
+                       HorizontalOptions="Center"
+                       FontSize="12"
+                       TextColor="#E8922E" />
+            </VerticalStackLayout>
 
-        </VerticalStackLayout>
+            <VerticalStackLayout Grid.Column="2"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center"
+                                 Margin="0,6,0,0"
+                                 Spacing="0">
+                <Label Text="{Binding CentsText}"
+                       HorizontalOptions="Center"
+                       FontSize="11"
+                       TextColor="#C9B68A" />
+                <Label Text="CENTS"
+                       HorizontalOptions="Center"
+                       FontSize="7"
+                       TextColor="#C9B68A" />
+            </VerticalStackLayout>
+
+        </Grid>
 
         <Button Text="{Binding ToggleButtonText}"
                 Command="{Binding ToggleListeningCommand}"

@@ -13,8 +13,10 @@ public class TunerViewModel : INotifyPropertyChanged
 	readonly INoteAnalyzerService _noteAnalyzerService;
 	readonly ISessionLogger _logger;
 
+	string _noteText = "—";
+	string _octaveText = string.Empty;
 	string _frequencyText = "0.0 Hz";
-	string _statusText = "Apasati Start";
+	string _centsText = string.Empty;
 	double _needleAngle;
 	bool _isListening;
 	string _toggleButtonText = "Start";
@@ -46,16 +48,28 @@ public class TunerViewModel : INotifyPropertyChanged
 
 	public event PropertyChangedEventHandler? PropertyChanged;
 
+	public string NoteText
+	{
+		get => _noteText;
+		private set => SetProperty(ref _noteText, value);
+	}
+
+	public string OctaveText
+	{
+		get => _octaveText;
+		private set => SetProperty(ref _octaveText, value);
+	}
+
 	public string FrequencyText
 	{
 		get => _frequencyText;
 		private set => SetProperty(ref _frequencyText, value);
 	}
 
-	public string StatusText
+	public string CentsText
 	{
-		get => _statusText;
-		private set => SetProperty(ref _statusText, value);
+		get => _centsText;
+		private set => SetProperty(ref _centsText, value);
 	}
 
 	public double NeedleAngle
@@ -179,14 +193,18 @@ public class TunerViewModel : INotifyPropertyChanged
 	{
 		if (noteResult.FrequencyHz <= 0)
 		{
+			NoteText = "—";
+			OctaveText = string.Empty;
 			FrequencyText = "0.0 Hz";
-			StatusText = IsListening ? "Incepeti sa cantati" : "Apasati Start";
+			CentsText = string.Empty;
 			NeedleAngle = 0;
 			return;
 		}
 
+		NoteText = noteResult.NoteName;
+		OctaveText = noteResult.Octave.ToString();
 		FrequencyText = $"{noteResult.FrequencyHz:F1} Hz";
-		StatusText = $"{noteResult.NoteName}{noteResult.Octave}   {noteResult.CentsDeviation:+0.0;-0.0;0} cents";
+		CentsText = $"{noteResult.CentsDeviation:+0;-0;0}";
 		NeedleAngle = MapCentsToAngle(noteResult.CentsDeviation);
 	}
 
