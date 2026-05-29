@@ -1,0 +1,34 @@
+# .NET MAUI / .NET build outputs
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.swp
+
+# NuGet packages
+packages/
+*.nupkg
+project.lock.json
+project.assets.json
+
+# Rider / JetBrains
+.idea/
+
+# VS Code
+.vscode/
+
+# Cursor AI - excludem configuratia locala, dar pastram regulile
+.cursor/*
+!.cursor/rules/
+
+# Logs si fisiere temporare
+*.log
+*.tmp
+tuner-session.log
+
+# macOS
+.DS_Store
+
+# Windows thumbnails
+Thumbs.db

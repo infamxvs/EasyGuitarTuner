@@ -1,0 +1,35 @@
+﻿---
+description: Backup automat pe GitHub la cererea utilizatorului
+alwaysApply: true
+---
+
+# Backup GitHub
+
+Cand utilizatorul cere "fa un backup in github", "backup github", "push pe github" sau similar, executa automat urmatorii pasi fara sa mai intrebi:
+
+## Pasi de executat
+
+1. Verifica daca exista modificari:
+```powershell
+Set-Location "C:\Users\Dan\source\repos\EasyGuitarTuner"
+git status
+```
+
+2. Daca exista fisiere modificate sau noi, adauga-le si fa commit:
+```powershell
+git add .
+git commit -m "Backup: <descriere scurta a ce s-a modificat>"
+```
+
+3. Fa push pe GitHub:
+```powershell
+$env:PATH += ";C:\Program Files\GitHub CLI"
+git push origin main
+```
+
+4. Confirma cu URL-ul repo-ului: https://github.com/infamxvs/EasyGuitarTuner
+
+## Note
+- Daca nu exista modificari fata de ultimul commit, anunta utilizatorul ca nu e nimic nou de urcat
+- Mesajul de commit trebuie sa descrie pe scurt ce s-a modificat (ex: "Backup: adaugat PitchDetector si UI updates")
+- Nu intreba confirmari, executa direct

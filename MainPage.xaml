@@ -1,0 +1,48 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:controls="clr-namespace:EasyGuitarTuner.Controls"
+             x:Class="EasyGuitarTuner.MainPage"
+             BackgroundColor="#F2F5F8"
+             Shell.NavBarIsVisible="False"
+             Title="Easy Guitar Tuner">
+
+    <Grid>
+
+        <controls:AnalogMeterView
+            HorizontalOptions="Fill"
+            VerticalOptions="Fill"
+            NeedleAngle="{Binding NeedleAngle}" />
+
+        <VerticalStackLayout
+            VerticalOptions="End"
+            Padding="24,0,24,24"
+            Spacing="6">
+
+            <Label Text="{Binding FrequencyText}"
+                   HorizontalOptions="Center"
+                   FontSize="34"
+                   FontAttributes="Bold"
+                   TextColor="#111827" />
+
+            <Label Text="{Binding StatusText}"
+                   HorizontalOptions="Center"
+                   FontSize="16"
+                   TextColor="#6B7280"
+                   Margin="0,2,0,0" />
+
+            <Button Text="{Binding ToggleButtonText}"
+                    Command="{Binding ToggleListeningCommand}"
+                    HorizontalOptions="Fill"
+                    BackgroundColor="#2E80E0"
+                    TextColor="White"
+                    CornerRadius="12"
+                    HeightRequest="50"
+                    FontSize="17"
+                    Margin="0,16,0,0" />
+
+        </VerticalStackLayout>
+
+    </Grid>
+
+</ContentPage>

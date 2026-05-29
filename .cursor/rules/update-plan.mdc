@@ -1,0 +1,30 @@
+---
+description: Mentine PLAN.md sincronizat cu starea reala a proiectului
+alwaysApply: true
+---
+
+# Actualizare PLAN.md
+
+Dupa orice modificare de structura sau abordare in proiect, actualizeaza `PLAN.md` inainte de a incheia conversatia.
+
+## Ce declansaza o actualizare
+
+- Adaugare sau stergere de fisiere (clase, servicii, controale, modele)
+- Schimbarea unui algoritm sau a unei abordari tehnice (ex: de la `IAudioRecorder` la `IAudioStreamer`)
+- Modificarea arhitecturii (flux de date, DI, dependente intre componente)
+- Adaugarea sau eliminarea de pachete NuGet
+- Modificarea permisiunilor de platforma
+- Orice schimbare in modul de build sau rulare
+
+## Reguli de scriere
+
+- **Sterge** descrierile vechilor abordari — PLAN.md descrie doar starea CURENTA
+- Actualizeaza diagrama de flux din sectiunea "Arhitectura generala" daca fluxul s-a schimbat
+- Actualizeaza sectiunea "Sumar fisiere" cu fisierele adaugate/sterse/modificate
+- Actualizeaza "Note tehnice pentru conversatii viitoare" cu deciziile de design noi
+- Pastreaza sectiunile "Build si rulare din Cursor" si "Pachete NuGet" la zi
+
+## Ce NU se adauga
+
+- Istoricul modificarilor sau "ce era inainte"
+- Comentarii de tip "am schimbat X in Y" — doar starea finala conteaza
