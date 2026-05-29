@@ -21,6 +21,7 @@ public class TunerViewModel : INotifyPropertyChanged
 	double _smoothedFrequency;
 	double _pendingFrequency;
 	int _silenceCount;
+	double _smoothedAngle;
 
 	const double SmoothingAlpha = 0.4;
 	const double JumpThreshold = 0.15;
@@ -28,6 +29,8 @@ public class TunerViewModel : INotifyPropertyChanged
 	const int HoldCycles = 3;
 	const double MaxCentsForNeedle = 50.0;
 	const double MaxNeedleAngleDegrees = 50.0;
+	const double CentsDeadband = 2.0;
+	const double AngleSmoothingAlpha = 0.6;
 
 	public TunerViewModel(
 		IAudioCaptureService audioCaptureService,
@@ -181,6 +184,7 @@ public class TunerViewModel : INotifyPropertyChanged
 			OctaveText = string.Empty;
 			FrequencyText = "0.0 Hz";
 			CentsText = string.Empty;
+			_smoothedAngle = 0;
 			NeedleAngle = 0;
 			return;
 		}
@@ -189,11 +193,18 @@ public class TunerViewModel : INotifyPropertyChanged
 		OctaveText = noteResult.Octave.ToString();
 		FrequencyText = $"{noteResult.FrequencyHz:F1} Hz";
 		CentsText = $"{noteResult.CentsDeviation:+0;-0;0}";
-		NeedleAngle = MapCentsToAngle(noteResult.CentsDeviation);
+
+		var targetAngle = MapCentsToAngle(noteResult.CentsDeviation);
+		_smoothedAngle = _smoothedAngle * (1 - AngleSmoothingAlpha) + targetAngle * AngleSmoothingAlpha;
+		NeedleAngle = _smoothedAngle;
 	}
 
+	// Deadband: cand abaterea e foarte mica (acordat), fixam acul pe 0 ca sa nu mai tremure.
 	static double MapCentsToAngle(double cents)
 	{
+		if (Math.Abs(cents) < CentsDeadband)
+			return 0;
+
 		var clampedCents = Math.Clamp(cents, -MaxCentsForNeedle, MaxCentsForNeedle);
 		return clampedCents / MaxCentsForNeedle * MaxNeedleAngleDegrees;
 	}

@@ -91,8 +91,11 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
   - **Variatii mici** (sub 15%): EMA cu `SmoothingAlpha = 0.4` — raspuns rapid la vibrato/drift fara saltari abrupte.
   - **Hold time** la linistire (RAW=0 si SMOOTH>0): incrementeaza `_silenceCount`. Cat timp e sub `HoldCycles = 3`, SMOOTH ramane neschimbat (acul si afisajul stau fixe pe ultima nota). La al 3-lea ciclu de liniste, reseteaza `SMOOTH = 0`, `_pendingFrequency = 0`, `_silenceCount = 0`. Crucial pentru coardele inalte (B3, E4) cu decay fizic scurt.
   - Cost: ~200ms latenta la inceputul fiecarei note noi (confirmare) + ~400ms persistenta vizuala dupa atenuare (2 cicluri vizibile inainte de reset). Castig: glitch-uri eliminate si afisare suficient de lunga pentru toate cele 6 coarde (E4 trece de la ~200ms la ~1.2s afisaj).
+- Stabilizarea unghiului acului (peste smoothing-ul pe frecventa):
+  - **Deadband** (`CentsDeadband = 2.0`): cand `|cents| < 2`, unghiul tinta e fortat la 0 — acul sta fix pe centru cand coarda e acordata, fara micro-tremur.
+  - **EMA pe unghi** (`AngleSmoothingAlpha = 0.6`): unghiul tinta trimis spre control e netezit (`_smoothedAngle = _smoothedAngle * 0.4 + target * 0.6`), reducand jitter-ul rezidual din cents la frecvente joase. Resetat la 0 cand semnalul dispare.
 - Logheaza pentru fiecare ciclu si **RMS-ul real** (util pentru diagnoza)
-- `MapCentsToAngle`: clampeaza cents la [-50, +50] si mapeaza la unghi ac [-50, +50] grade (aliniat la marcajele cadranului)
+- `MapCentsToAngle`: aplica deadband, apoi clampeaza cents la [-50, +50] si mapeaza la unghi ac [-50, +50] grade (aliniat la marcajele cadranului)
 - Orchestreaza `PitchDetectorService`, `NoteAnalyzerService` si `ISessionLogger`
 
 ---
@@ -103,10 +106,12 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 - Deseneaza doua imagini incarcate din `Resources/Raw`: fundalul cadranului VU vintage (`background.png`, 900×1950) si acul indicator (`needle.png`, 20×284)
 - Imaginile sunt incarcate o singura data ca `SKImage` prin `FileSystem.OpenAppPackageFileAsync` (pixel-perfect, fara rescalare DPI), apoi cache-uite
 - **Fundal**: scalat cu `scale = min(width/bgW, height/bgH)` si centrat (fit "contain", fara distorsiune); raportul imaginii ≈ raportul ferestrei deci umple ecranul
-- **Ac**: desenat peste fundal, ancorat la baza lui (jos-centru = pixel `(needleW/2, needleH)`). Transformarea: `Translate(pivot)` → `Scale(scale)` → `RotateDegrees(NeedleAngle)` → `DrawImage(needle, -needleW/2, -needleH)`. Rotatia se face exact in jurul bazei acului
+- **Ac**: desenat peste fundal, ancorat la baza lui (jos-centru = pixel `(needleW/2, needleH)`). Transformarea: `Translate(pivot)` → `Scale(scale)` → `RotateDegrees(_currentAngle)` → `DrawImage(needle, -needleW/2, -needleH)`. Rotatia se face exact in jurul bazei acului
+- **Animatie lina a acului**: `NeedleAngle` (din binding) este doar *unghiul tinta* (`_targetAngle`). Un `IDispatcherTimer` la ~60 FPS (`FrameIntervalMs = 16`) interpoleaza unghiul desenat `_currentAngle` spre tinta (`_currentAngle += (target - current) * AngleLerpFactor`, `AngleLerpFactor = 0.3`). Acul gliseaza fluid intre cele ~5 valori/secunda primite de la detector.
+- **Optimizare mobil**: timer-ul ruleaza **doar cat timp acul se misca**. Cand `|target - current| <= AngleSettleThreshold` (0.05), `_currentAngle` se aliniaza pe tinta si timer-ul se opreste — in repaus (fara semnal/acul fix) consumul CPU/baterie e zero.
 - **Pivot** exprimat ca fractii din imaginea de fundal: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` (valori validate vizual — acul sta corect pe pivotul cadranului)
 - Sampling de calitate (`SKSamplingOptions` Linear/Linear)
-- Singura proprietate bindabila: `NeedleAngle`
+- Singura proprietate bindabila: `NeedleAngle` (unghiul tinta)
 
 ---
 
@@ -167,8 +172,8 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 | `Services/NoteAnalyzerService.cs` | Creat |
 | `Services/ISessionLogger.cs` | Creat |
 | `Services/FileSessionLogger.cs` | Creat |
-| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing + EMA + hold time; unghi ac ±50° pentru ±50 centi; eliminat butonul — metode `StartAsync`/`StopAsync` in loc de `ToggleListeningCommand`) |
-| `Controls/AnalogMeterView.cs` | Modificat (grafica pe imagini: fundal + ac rotit din `Resources/Raw`) |
+| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing + EMA + hold time; deadband pe cents + EMA pe unghi; unghi ac ±50° pentru ±50 centi; eliminat butonul — metode `StartAsync`/`StopAsync` in loc de `ToggleListeningCommand`) |
+| `Controls/AnalogMeterView.cs` | Modificat (grafica pe imagini: fundal + ac rotit din `Resources/Raw`; animatie lina a acului prin `IDispatcherTimer` la 60 FPS cu auto-stop in repaus) |
 | `Resources/Raw/background.png` | Creat (fundal cadran VU, 900×1950; include titlul si caseta neagra de afisaj desenate in imagine) |
 | `Resources/Raw/needle.png` | Creat (ac indicator, 20×284) |
 | `MainPage.xaml` | Modificat (afisaj pe 3 coloane `*,2*,*` la `0.5,0.73`; doar text peste caseta neagra din imagine, fara `Border`; etichete laterale culoare `#C9B68A`; eliminat butonul Start/Stop) |
@@ -285,6 +290,10 @@ Folderele excluse din backup (`bin`, `obj`, `.vs`, `.git`, `packages`) se regene
   1. **Confirmare in 2 cicluri** la cold-start sau saltea mare (>15%): RAW nou intra in `_pendingFrequency`, acul nu se misca. Doar dupa ce ciclul urmator confirma o frecventa similara (<5% diferenta) cu pending-ul, comutam `SMOOTH = RAW`. Filtreaza glitch-uri izolate (ex: un ciclu cu RAW=97 Hz urmat de RAW=196 Hz stabil → glitch-ul ignorat).
   2. **EMA** (`smooth = smooth * 0.6 + raw * 0.4`) pentru variatii sub 15% — raspuns rapid la vibrato/drift fara saltari.
   3. **Hold time** (`HoldCycles = 3`) cand RAW=0: SMOOTH ramane neschimbat pentru 2 cicluri vizibile (~400ms), apoi al 3-lea ciclu reseteaza la 0. Crucial pentru coardele inalte (B3, E4) care au decay fizic foarte scurt — fara hold, E4 ar dispărea instant dupa 1 ciclu de detectie.
+- **Stabilizare + animatie ac (2 niveluri)**: detectorul produce doar ~5 valori/secunda, deci miscarea directa a acului ar fi sacadata. Solutia are doua straturi complementare:
+  1. **Nivel valoare (TunerViewModel)**: deadband pe cents (`< 2` centi → unghi 0, opreste tremurul cand e acordat) + EMA pe unghi (`AngleSmoothingAlpha = 0.6`) ca sa stabilizeze *unde* trebuie sa ajunga acul.
+  2. **Nivel miscare (AnalogMeterView)**: `IDispatcherTimer` la 60 FPS interpoleaza lin unghiul desenat spre tinta (`AngleLerpFactor = 0.3`), deci acul *gliseaza* intre valori in loc sa teleporteze.
+- **Buget mobil pentru animatie**: timer-ul de 60 FPS din `AnalogMeterView` porneste cand se schimba unghiul tinta si se **opreste automat** cand acul a ajuns (`AngleSettleThreshold = 0.05`). Astfel redesenarea costisitoare ruleaza doar in timpul tranzitiilor (cand canti), nu permanent — esential pentru baterie/CPU pe telefoane. Evita orice loop de animatie always-on.
 - **Sample rate asumat**: 44100 Hz pe toate platformele. Daca microfonul Windows ruleaza nativ la 48000 Hz si plugin-ul nu onoreaza setarea, frecventele vor aparea cu ~8.8% mai mari decat real — verificabil din `tuner-session.log` (CENTS constant mare la o coarda cunoscuta).
 - **Range ac ±50 centi**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 si mapeaza la ±50° (`MaxCentsForNeedle = 50`, `MaxNeedleAngleDegrees = 50`), aliniat la marcaje.
 - **Grafica pe imagini (AnalogMeterView)**: in loc de desen procedural, controlul incarca `background.png` si `needle.png` din `Resources/Raw` ca `SKImage` (o singura data, cache). Fundalul e scalat "contain" si centrat. Acul e desenat peste fundal cu transformarea `Translate(pivot) → Scale(scale) → RotateDegrees(NeedleAngle) → DrawImage(needle, -needleW/2, -needleH)`, deci pivotul de rotatie e baza acului. Pozitia pivotului in cadran = `PivotXFraction`/`PivotYFraction` (fractii din imagine), reglabile vizual.
