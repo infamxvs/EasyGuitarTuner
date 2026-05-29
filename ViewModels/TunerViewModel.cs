@@ -1,6 +1,5 @@
 ﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows.Input;
 using EasyGuitarTuner.Models;
 using EasyGuitarTuner.Services;
 
@@ -19,7 +18,6 @@ public class TunerViewModel : INotifyPropertyChanged
 	string _centsText = string.Empty;
 	double _needleAngle;
 	bool _isListening;
-	string _toggleButtonText = "Start";
 	double _smoothedFrequency;
 	double _pendingFrequency;
 	int _silenceCount;
@@ -43,7 +41,6 @@ public class TunerViewModel : INotifyPropertyChanged
 		_logger = logger;
 
 		_audioCaptureService.OnAudioCaptured += OnAudioCaptured;
-		ToggleListeningCommand = new Command(async () => await ToggleListeningAsync());
 	}
 
 	public event PropertyChangedEventHandler? PropertyChanged;
@@ -78,35 +75,22 @@ public class TunerViewModel : INotifyPropertyChanged
 		private set => SetProperty(ref _needleAngle, value);
 	}
 
-	public bool IsListening
+	public async Task StartAsync()
 	{
-		get => _isListening;
-		private set
-		{
-			if (SetProperty(ref _isListening, value))
-				ToggleButtonText = value ? "Stop" : "Start";
-		}
-	}
-
-	public string ToggleButtonText
-	{
-		get => _toggleButtonText;
-		private set => SetProperty(ref _toggleButtonText, value);
-	}
-
-	public ICommand ToggleListeningCommand { get; }
-
-	async Task ToggleListeningAsync()
-	{
-		if (IsListening)
-		{
-			await _audioCaptureService.StopAsync();
-			IsListening = false;
+		if (_isListening)
 			return;
-		}
 
 		await _audioCaptureService.StartAsync();
-		IsListening = true;
+		_isListening = true;
+	}
+
+	public async Task StopAsync()
+	{
+		if (!_isListening)
+			return;
+
+		await _audioCaptureService.StopAsync();
+		_isListening = false;
 	}
 
 	void OnAudioCaptured(object? sender, byte[] pcmData)

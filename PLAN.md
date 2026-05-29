@@ -80,7 +80,8 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 ### ViewModel
 
 **`ViewModels/TunerViewModel.cs`**
-- Proprietati bindabile: `NoteText`, `OctaveText`, `FrequencyText`, `CentsText`, `NeedleAngle`, `ToggleButtonText`, `IsListening`
+- Proprietati bindabile: `NoteText`, `OctaveText`, `FrequencyText`, `CentsText`, `NeedleAngle`
+- Expune metodele publice `StartAsync()` / `StopAsync()` (idempotente, protejate de flag-ul intern `_isListening`) — apelate din `MainPage.OnAppearing` / `OnDisappearing` pentru pornire/oprire automata a capturii (fara buton)
 - `NoteText` / `OctaveText`: nota detectata si octava (ex: `"E"` + `"2"`); cand nu exista semnal `NoteText = "—"`, `OctaveText = ""`
 - `FrequencyText`: ex `"247.6 Hz"` sau `"0.0 Hz"` cand nu se detecteaza
 - `CentsText`: deviatia rotunjita la intreg cu semn (ex: `"-1"`, `"+4"`); gol cand nu exista semnal
@@ -118,7 +119,7 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
   - **Stanga**: eticheta `STANDARD` + valoare statica `440 Hz` (referinta acordaj, culoare `#C9B68A`, fonturi 7 / 9)
   - **Centru**: **doar text** (fara niciun chenar desenat) plasat peste caseta neagra din imagine — nota mare + octava ca subscript (`FormattedString` doua `Span`-uri, `#F2A640`, fonturi 34 / 16) si frecventa dedesubt (`#E8922E`, font 12)
   - **Dreapta**: valoarea `CentsText` + eticheta `CENTS` (culoare `#C9B68A`, fonturi 11 / 7)
-- Buton Start / Stop in stil vintage (fundal `#3A2A18`, border `#8A6A3A`, text `#F5E6C8`) peste panoul de jos (`LayoutBounds="0.5,0.9,0.7,0.09"`)
+- Fara buton de control: detectia porneste automat la afisarea paginii (`OnAppearing` apeleaza `TunerViewModel.StartAsync()`) si se opreste la inchidere (`OnDisappearing` apeleaza `StopAsync()`)
 - Titlul aplicatiei si caseta de afisaj sunt parte din imaginea de fundal (fara header XAML si fara `Border` desenat — peste fundal se aseaza doar text)
 
 ---
@@ -166,11 +167,12 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 | `Services/NoteAnalyzerService.cs` | Creat |
 | `Services/ISessionLogger.cs` | Creat |
 | `Services/FileSessionLogger.cs` | Creat |
-| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing + EMA + hold time; unghi ac ±50° pentru ±50 centi) |
+| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing + EMA + hold time; unghi ac ±50° pentru ±50 centi; eliminat butonul — metode `StartAsync`/`StopAsync` in loc de `ToggleListeningCommand`) |
 | `Controls/AnalogMeterView.cs` | Modificat (grafica pe imagini: fundal + ac rotit din `Resources/Raw`) |
 | `Resources/Raw/background.png` | Creat (fundal cadran VU, 900×1950; include titlul si caseta neagra de afisaj desenate in imagine) |
 | `Resources/Raw/needle.png` | Creat (ac indicator, 20×284) |
-| `MainPage.xaml` | Modificat (afisaj pe 3 coloane `*,2*,*` la `0.5,0.73`; doar text peste caseta neagra din imagine, fara `Border`; etichete laterale culoare `#C9B68A`) |
+| `MainPage.xaml` | Modificat (afisaj pe 3 coloane `*,2*,*` la `0.5,0.73`; doar text peste caseta neagra din imagine, fara `Border`; etichete laterale culoare `#C9B68A`; eliminat butonul Start/Stop) |
+| `MainPage.xaml.cs` | Modificat (override `OnAppearing`/`OnDisappearing` pentru pornire/oprire automata a detectiei) |
 | `Services/PitchDetectorService.cs` | Modificat (prag RMS scazut la 0.003 pentru coarde subtiri) |
 | `MauiProgram.cs` | Modificat (fonts) |
 | `App.xaml.cs` | Modificat (DI + fereastra fixa 249x540 pe Windows) |
@@ -216,7 +218,7 @@ dotnet build -f net10.0-windows10.0.19041.0 -c Release
 
 ### Permisiuni microfon pe Windows
 
-Deoarece proiectul ruleaza **neimpachetat** (`WindowsPackageType=None`), permisiunile din `Package.appxmanifest` nu se aplica automat. La primul apas pe **Start**, Windows poate cere acces la microfon printr-un popup. Daca nu apare popup-ul, activeaza manual din:
+Deoarece proiectul ruleaza **neimpachetat** (`WindowsPackageType=None`), permisiunile din `Package.appxmanifest` nu se aplica automat. La pornirea aplicatiei (detectia incepe automat), Windows poate cere acces la microfon printr-un popup. Daca nu apare popup-ul, activeaza manual din:
 
 **Setari Windows → Confidentialitate si securitate → Microfon → Permite aplicatiilor desktop sa acceseze microfonul**
 
