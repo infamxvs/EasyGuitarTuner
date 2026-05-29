@@ -3,46 +3,47 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:controls="clr-namespace:EasyGuitarTuner.Controls"
              x:Class="EasyGuitarTuner.MainPage"
-             BackgroundColor="#F2F5F8"
+             BackgroundColor="#1A120B"
              Shell.NavBarIsVisible="False"
              Title="Easy Guitar Tuner">
 
-    <Grid>
+    <AbsoluteLayout>
 
         <controls:AnalogMeterView
-            HorizontalOptions="Fill"
-            VerticalOptions="Fill"
+            AbsoluteLayout.LayoutBounds="0,0,1,1"
+            AbsoluteLayout.LayoutFlags="All"
             NeedleAngle="{Binding NeedleAngle}" />
 
         <VerticalStackLayout
-            VerticalOptions="End"
-            Padding="24,0,24,24"
-            Spacing="6">
+            AbsoluteLayout.LayoutBounds="0.5,0.69,0.7,0.12"
+            AbsoluteLayout.LayoutFlags="All"
+            Spacing="2"
+            VerticalOptions="Center">
 
             <Label Text="{Binding FrequencyText}"
                    HorizontalOptions="Center"
-                   FontSize="34"
+                   FontSize="26"
                    FontAttributes="Bold"
-                   TextColor="#111827" />
+                   TextColor="#F5E6C8" />
 
             <Label Text="{Binding StatusText}"
                    HorizontalOptions="Center"
-                   FontSize="16"
-                   TextColor="#6B7280"
-                   Margin="0,2,0,0" />
-
-            <Button Text="{Binding ToggleButtonText}"
-                    Command="{Binding ToggleListeningCommand}"
-                    HorizontalOptions="Fill"
-                    BackgroundColor="#2E80E0"
-                    TextColor="White"
-                    CornerRadius="12"
-                    HeightRequest="50"
-                    FontSize="17"
-                    Margin="0,16,0,0" />
+                   FontSize="14"
+                   TextColor="#C9B68A" />
 
         </VerticalStackLayout>
 
-    </Grid>
+        <Button Text="{Binding ToggleButtonText}"
+                Command="{Binding ToggleListeningCommand}"
+                AbsoluteLayout.LayoutBounds="0.5,0.9,0.7,0.09"
+                AbsoluteLayout.LayoutFlags="All"
+                BackgroundColor="#3A2A18"
+                TextColor="#F5E6C8"
+                BorderColor="#8A6A3A"
+                BorderWidth="1"
+                CornerRadius="10"
+                FontSize="16" />
+
+    </AbsoluteLayout>
 
 </ContentPage>

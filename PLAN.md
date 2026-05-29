@@ -99,23 +99,13 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 
 ### Controale UI
 
-**`Controls/AnalogMeterView.cs`** — SkiaSharp custom control (tema light, design modern)
-- Fundal transparent (pagina ofera fundalul deschis `#F2F5F8`)
-- Arc semicircular gros (8.5% din raza) cu capete rotunjite, culoare gri-albastrui `#DCE3EB`
-- Segment albastru solid `#2E80E0` peste arc, in zona "in tune" (±15 centi)
-- Pana albastra translucida (rgba 46,128,224,38) — triunghi de la pivot pana la arc, in aceeasi zona ±15 centi
-- Tick marks interioare:
-  - Minor (1.2px) la fiecare 5 centi
-  - Major (1.6px, mai lung) la fiecare 20 centi, cu eticheta numerica (-100, -80, -60, -40, -20, +20, +40, +60, +80, +100)
-  - Tick-urile sunt suprimate in zona |cents| < 15 pentru a evita aglomerarea pe pana albastra
-- Ac negru `#111827` subtire (1.8% din raza), drept, pleaca din pivot
-- Pivot: cerc plin negru (5.5% din raza)
-- Range cents: ±100, mapat la unghi ±90 grade
-- **Calcul raza** care garanteaza incadrarea completa in panza tinand cont de stroke-ul gros si pivot:
-  - `sideMaxRadius = (centerX - pad) / (1 + strokeHalf)`
-  - `heightMaxRadius = (height - 2*pad) / (1 + strokeHalf + pivotFraction)`
-  - `radius = min(sideMaxRadius, heightMaxRadius)` — limita binding
-  - `centerY = pad + radius * (1 + strokeHalf)` — exact 8px margine sus la marginea exterioara a arcului
+**`Controls/AnalogMeterView.cs`** — SkiaSharp custom control (grafica pe baza de imagini)
+- Deseneaza doua imagini incarcate din `Resources/Raw`: fundalul cadranului VU vintage (`background.png`, 900×1950) si acul indicator (`needle.png`, 20×284)
+- Imaginile sunt incarcate o singura data ca `SKImage` prin `FileSystem.OpenAppPackageFileAsync` (pixel-perfect, fara rescalare DPI), apoi cache-uite
+- **Fundal**: scalat cu `scale = min(width/bgW, height/bgH)` si centrat (fit "contain", fara distorsiune); raportul imaginii ≈ raportul ferestrei deci umple ecranul
+- **Ac**: desenat peste fundal, ancorat la baza lui (jos-centru = pixel `(needleW/2, needleH)`). Transformarea: `Translate(pivot)` → `Scale(scale)` → `RotateDegrees(NeedleAngle)` → `DrawImage(needle, -needleW/2, -needleH)`. Rotatia se face exact in jurul bazei acului
+- **Pivot** exprimat ca fractii din imaginea de fundal, reglabile vizual: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` (estimari de start, de calibrat)
+- Sampling de calitate (`SKSamplingOptions` Linear/Linear)
 - Singura proprietate bindabila: `NeedleAngle`
 
 ---
@@ -123,10 +113,11 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 ### Pagini
 
 **`MainPage.xaml`** + **`MainPage.xaml.cs`**
-- Tema deschisa: fundal `#F2F5F8`
-- `AnalogMeterView` acopera intregul ecran (canvas full-screen), pivotul acului la `height/2` = centrul ecranului
-- Frecventa mare bold `#111827` si status `#6B7280` suprapuse in jumatatea de jos via `VerticalStackLayout VerticalOptions="End"`
-- Buton Start / Stop albastru `#2E80E0` cu text alb, corner radius 12
+- `AbsoluteLayout` cu pozitionare proportionala peste imaginea de fundal
+- `AnalogMeterView` acopera intregul ecran (`LayoutBounds="0,0,1,1"`)
+- Frecventa + status (culori warm `#F5E6C8` / `#C9B68A`) plasate peste dreptunghiul negru de afisaj din cadran (`LayoutBounds="0.5,0.69,0.7,0.12"`)
+- Buton Start / Stop in stil vintage (fundal `#3A2A18`, border `#8A6A3A`, text `#F5E6C8`) peste panoul de jos (`LayoutBounds="0.5,0.9,0.7,0.09"`)
+- Titlul aplicatiei este parte din imaginea de fundal (fara header XAML duplicat)
 
 ---
 
@@ -173,9 +164,11 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 | `Services/NoteAnalyzerService.cs` | Creat |
 | `Services/ISessionLogger.cs` | Creat |
 | `Services/FileSessionLogger.cs` | Creat |
-| `ViewModels/TunerViewModel.cs` | Modificat (smoothing cu confirmare + EMA + hold time, log RMS) |
-| `Controls/AnalogMeterView.cs` | Modificat (tema light minimalist, calcul raza precis) |
-| `MainPage.xaml` | Modificat (tema light, layout simplu, NavBar ascuns) |
+| `ViewModels/TunerViewModel.cs` | Modificat (smoothing + EMA + hold time; unghi ac ±50° pentru ±50 centi) |
+| `Controls/AnalogMeterView.cs` | Modificat (grafica pe imagini: fundal + ac rotit din `Resources/Raw`) |
+| `Resources/Raw/background.png` | Creat (fundal cadran VU, 900×1950) |
+| `Resources/Raw/needle.png` | Creat (ac indicator, 20×284) |
+| `MainPage.xaml` | Modificat (AbsoluteLayout proportional peste imagine, stil vintage) |
 | `Services/PitchDetectorService.cs` | Modificat (prag RMS scazut la 0.003 pentru coarde subtiri) |
 | `MauiProgram.cs` | Modificat (fonts) |
 | `App.xaml.cs` | Modificat (DI + fereastra fixa 249x540 pe Windows) |
@@ -289,9 +282,10 @@ Folderele excluse din backup (`bin`, `obj`, `.vs`, `.git`, `packages`) se regene
   2. **EMA** (`smooth = smooth * 0.6 + raw * 0.4`) pentru variatii sub 15% — raspuns rapid la vibrato/drift fara saltari.
   3. **Hold time** (`HoldCycles = 3`) cand RAW=0: SMOOTH ramane neschimbat pentru 2 cicluri vizibile (~400ms), apoi al 3-lea ciclu reseteaza la 0. Crucial pentru coardele inalte (B3, E4) care au decay fizic foarte scurt — fara hold, E4 ar dispărea instant dupa 1 ciclu de detectie.
 - **Sample rate asumat**: 44100 Hz pe toate platformele. Daca microfonul Windows ruleaza nativ la 48000 Hz si plugin-ul nu onoreaza setarea, frecventele vor aparea cu ~8.8% mai mari decat real — verificabil din `tuner-session.log` (CENTS constant mare la o coarda cunoscuta).
-- **Range ac ±100 centi**: o nota chitara fata de vecina cea mai apropiata (3-4 semitonuri ≈ 300-400 centi) e mereu clampata la ±100 vizual. Util pentru a vedea "cat de aproape" esti — daca acul e la marginea arcului, mai trebuie sa intinzi/slabesti mult; daca e in pana albastra (±15 centi), esti acordat.
-- **Tema vizuala light**: design modern minimalist — fundal `#F2F5F8`, arc gri `#DCE3EB`, accent albastru `#2E80E0`, ac negru. Pana albastra translucida + segment solid albastru pe arc indica zona "in tune".
-- **Calcul corect al razei in AnalogMeterView**: canvas-ul acopera intregul ecran. `centerY = height / 2` (pivotul la centrul ecranului). Raza este `min(sideMaxRadius, topMaxRadius)` unde `sideMaxRadius = (centerX - pad) / (1 + strokeHalf)` si `topMaxRadius = (centerY - pad) / (1 + strokeHalf)`. Arcul semicircular se extinde in sus din pivot, in jumatatea superioara a ecranului. Labelurile si butonul sunt suprapuse in jumatatea inferioara fara overlap vizual.
+- **Range ac ±50 centi**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 si mapeaza la ±50° (`MaxCentsForNeedle = 50`, `MaxNeedleAngleDegrees = 50`). Valori de calibrat impreuna cu fractiile pivotului pentru a alinia acul exact pe marcaje.
+- **Grafica pe imagini (AnalogMeterView)**: in loc de desen procedural, controlul incarca `background.png` si `needle.png` din `Resources/Raw` ca `SKImage` (o singura data, cache). Fundalul e scalat "contain" si centrat. Acul e desenat peste fundal cu transformarea `Translate(pivot) → Scale(scale) → RotateDegrees(NeedleAngle) → DrawImage(needle, -needleW/2, -needleH)`, deci pivotul de rotatie e baza acului. Pozitia pivotului in cadran = `PivotXFraction`/`PivotYFraction` (fractii din imagine), reglabile vizual.
+- **De ce Resources/Raw si nu MauiImage**: imaginile trebuie pastrate la rezolutia reala (acul e deja la scara corecta fata de fundal). `MauiImage` ar aplica rescalare dupa DPI si ar strica raportul. `MauiAsset` (folderul `Resources/Raw`) pastreaza fisierul pixel-perfect, incarcabil cu `FileSystem.OpenAppPackageFileAsync`.
+- **Calibrare pivot/unghi**: `PivotYFraction` (~0.56) si `MaxNeedleAngleDegrees` (50) sunt estimari de start. Se rafineaza prin rulari repetate pana cand baza acului sta pe pivotul fizic al cadranului si varful atinge `±50` pe marcaje.
 - **Hold time vs decay fizic**: coardele subtiri (B3 = 247 Hz, E4 = 330 Hz) au timp de decay fizic de ~3x mai scurt decat coardele groase (E2 = 82 Hz). Fara hold time, E4 ar fi afisat doar 200ms inainte ca RMS sa scada sub prag. Combinatia "prag RMS scazut la 0.003 + hold de 3 cicluri" extinde afisarea E4 de la ~200ms la ~1.2s, suficient pentru utilizator sa citeasca cents-urile.
 - **Raport de aspect 19.5:9**: aplicatia este blocata in portret pe Android (atribut `ScreenOrientation.Portrait` in `MainActivity`) si iOS (doar `UIInterfaceOrientationPortrait` in `Info.plist`). Pe Windows, fereastra este fixata la 249×540 pixeli (540/249 ≈ 2.169 ≈ 19.5:9) prin `CreateWindow` in `App.xaml.cs` cu `MinimumWidth = MaximumWidth = 249` si `MinimumHeight = MaximumHeight = 540`. Utilizatorul nu poate redimensiona fereastra pe Windows.
 - **Cum sa setezi NavBarIsVisible**: pentru a ascunde bara purpurie cu titlul aplicatiei (cand pagina e gazduita in Shell), foloseste `Shell.NavBarIsVisible="False"` pe `ContentPage` in XAML. Important pentru un look complet curat fara header.

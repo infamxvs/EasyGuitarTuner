@@ -26,8 +26,8 @@ public class TunerViewModel : INotifyPropertyChanged
 	const double JumpThreshold = 0.15;
 	const double SimilarityThreshold = 0.05;
 	const int HoldCycles = 3;
-	const double MaxCentsForNeedle = 100.0;
-	const double MaxNeedleAngleDegrees = 90.0;
+	const double MaxCentsForNeedle = 50.0;
+	const double MaxNeedleAngleDegrees = 50.0;
 
 	public TunerViewModel(
 		IAudioCaptureService audioCaptureService,
