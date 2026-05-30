@@ -6,19 +6,8 @@ namespace EasyGuitarTuner.Controls;
 
 public class AnalogMeterView : SKCanvasView
 {
-	// Pozitia pivotului acului, ca fractii din imaginea de fundal.
-	// Estimari de start - se calibreaza vizual dupa prima rulare.
-	const float PivotXFraction = 0.5f;
-	const float PivotYFraction = 0.56f;
-
 	const string BackgroundAsset = "background.png";
 	const string NeedleAsset = "needle.png";
-
-	// Animatie ac: factor de interpolare per cadru + pragul la care consideram ca a ajuns.
-	// Cat timp acul se misca, redesenam la ~60 FPS; cand ajunge, oprim timer-ul (zero cost in repaus).
-	const double AngleLerpFactor = 0.3;
-	const double AngleSettleThreshold = 0.05;
-	const int FrameIntervalMs = 16;
 
 	static readonly SKSamplingOptions Sampling = new(SKFilterMode.Linear, SKMipmapMode.Linear);
 
@@ -67,7 +56,7 @@ public class AnalogMeterView : SKCanvasView
 	IDispatcherTimer CreateAnimationTimer()
 	{
 		var timer = Dispatcher.CreateTimer();
-		timer.Interval = TimeSpan.FromMilliseconds(FrameIntervalMs);
+		timer.Interval = TimeSpan.FromMilliseconds(TunerSettings.FrameIntervalMs);
 		timer.Tick += OnAnimationTick;
 		return timer;
 	}
@@ -76,14 +65,14 @@ public class AnalogMeterView : SKCanvasView
 	{
 		var delta = _targetAngle - _currentAngle;
 
-		if (Math.Abs(delta) <= AngleSettleThreshold)
+		if (Math.Abs(delta) <= TunerSettings.AngleSettleThreshold)
 		{
 			_currentAngle = _targetAngle;
 			_animationTimer?.Stop();
 		}
 		else
 		{
-			_currentAngle += delta * AngleLerpFactor;
+			_currentAngle += delta * TunerSettings.AngleLerpFactor;
 		}
 
 		InvalidateSurface();
@@ -123,8 +112,8 @@ public class AnalogMeterView : SKCanvasView
 
 	void DrawNeedle(SKCanvas canvas, float scale, float offsetX, float offsetY)
 	{
-		var pivotX = offsetX + _background!.Width * scale * PivotXFraction;
-		var pivotY = offsetY + _background.Height * scale * PivotYFraction;
+		var pivotX = offsetX + _background!.Width * scale * TunerSettings.PivotXFraction;
+		var pivotY = offsetY + _background.Height * scale * TunerSettings.PivotYFraction;
 
 		canvas.Save();
 		canvas.Translate(pivotX, pivotY);

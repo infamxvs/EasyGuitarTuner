@@ -24,6 +24,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ISessionLogger, FileSessionLogger>();
 		builder.Services.AddSingleton<IAudioCaptureService, AudioCaptureService>();
 		builder.Services.AddSingleton<IPitchDetectorService, PitchDetectorService>();
+		builder.Services.AddSingleton<IFrequencyStabilizer, FrequencyStabilizer>();
 		builder.Services.AddSingleton<INoteAnalyzerService, NoteAnalyzerService>();
 		builder.Services.AddTransient<TunerViewModel>();
 		builder.Services.AddTransient<MainPage>();

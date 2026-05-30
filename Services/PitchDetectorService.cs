@@ -5,11 +5,6 @@ namespace EasyGuitarTuner.Services;
 
 public class PitchDetectorService : IPitchDetectorService
 {
-	const double MinFrequencyHz = 70;
-	const double MaxFrequencyHz = 1200;
-	const double NoiseFloorRms = 0.003;
-	const int HarmonicCount = 5;
-
 	public double DetectPitch(byte[] pcmData, int sampleRate)
 	{
 		if (pcmData.Length < 4 || sampleRate <= 0)
@@ -35,8 +30,8 @@ public class PitchDetectorService : IPitchDetectorService
 		Fourier.Forward(buffer, FourierOptions.Matlab);
 
 		var halfSize = fftSize / 2;
-		var minBin = Math.Max(1, (int)Math.Floor(MinFrequencyHz * fftSize / sampleRate));
-		var maxBin = Math.Min(halfSize, (int)Math.Ceiling(MaxFrequencyHz * fftSize / sampleRate));
+		var minBin = Math.Max(1, (int)Math.Floor(TunerSettings.MinFrequencyHz * fftSize / sampleRate));
+		var maxBin = Math.Min(halfSize, (int)Math.Ceiling(TunerSettings.MaxFrequencyHz * fftSize / sampleRate));
 
 		var magnitudes = new double[halfSize + 1];
 		for (var i = 0; i <= halfSize; i++)
@@ -55,7 +50,7 @@ public class PitchDetectorService : IPitchDetectorService
 		var refinedBin = RefinePeakBin(hps, peakBin, maxBin);
 		var frequency = refinedBin * sampleRate / fftSize;
 
-		if (frequency < MinFrequencyHz || frequency > MaxFrequencyHz)
+		if (frequency < TunerSettings.MinFrequencyHz || frequency > TunerSettings.MaxFrequencyHz)
 			return 0;
 
 		return frequency;
@@ -68,7 +63,7 @@ public class PitchDetectorService : IPitchDetectorService
 			sumSquares += s * s;
 
 		var rms = Math.Sqrt(sumSquares / samples.Length);
-		return rms >= NoiseFloorRms;
+		return rms >= TunerSettings.NoiseFloorRms;
 	}
 
 	static double[] ComputeHarmonicProductSpectrum(double[] magnitudes, int minBin, int maxBin, int halfSize)
@@ -78,7 +73,7 @@ public class PitchDetectorService : IPitchDetectorService
 		for (var bin = minBin; bin <= maxBin; bin++)
 			hps[bin] = magnitudes[bin];
 
-		for (var k = 2; k <= HarmonicCount; k++)
+		for (var k = 2; k <= TunerSettings.HarmonicCount; k++)
 		{
 			for (var bin = minBin; bin <= maxBin; bin++)
 			{

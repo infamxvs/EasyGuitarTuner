@@ -9,6 +9,7 @@ public class TunerViewModel : INotifyPropertyChanged
 {
 	readonly IAudioCaptureService _audioCaptureService;
 	readonly IPitchDetectorService _pitchDetectorService;
+	readonly IFrequencyStabilizer _frequencyStabilizer;
 	readonly INoteAnalyzerService _noteAnalyzerService;
 	readonly ISessionLogger _logger;
 
@@ -18,28 +19,18 @@ public class TunerViewModel : INotifyPropertyChanged
 	string _centsText = string.Empty;
 	double _needleAngle;
 	bool _isListening;
-	double _smoothedFrequency;
-	double _pendingFrequency;
-	int _silenceCount;
 	double _smoothedAngle;
-
-	const double SmoothingAlpha = 0.4;
-	const double JumpThreshold = 0.15;
-	const double SimilarityThreshold = 0.05;
-	const int HoldCycles = 3;
-	const double MaxCentsForNeedle = 50.0;
-	const double MaxNeedleAngleDegrees = 50.0;
-	const double CentsDeadband = 2.0;
-	const double AngleSmoothingAlpha = 0.6;
 
 	public TunerViewModel(
 		IAudioCaptureService audioCaptureService,
 		IPitchDetectorService pitchDetectorService,
+		IFrequencyStabilizer frequencyStabilizer,
 		INoteAnalyzerService noteAnalyzerService,
 		ISessionLogger logger)
 	{
 		_audioCaptureService = audioCaptureService;
 		_pitchDetectorService = pitchDetectorService;
+		_frequencyStabilizer = frequencyStabilizer;
 		_noteAnalyzerService = noteAnalyzerService;
 		_logger = logger;
 
@@ -93,6 +84,7 @@ public class TunerViewModel : INotifyPropertyChanged
 			return;
 
 		await _audioCaptureService.StopAsync();
+		_frequencyStabilizer.Reset();
 		_isListening = false;
 	}
 
@@ -100,63 +92,15 @@ public class TunerViewModel : INotifyPropertyChanged
 	{
 		var rms = ComputeRms(pcmData);
 		var rawFrequency = _pitchDetectorService.DetectPitch(pcmData, _audioCaptureService.SampleRate);
+		var stableFrequency = _frequencyStabilizer.Stabilize(rawFrequency);
 
-		if (rawFrequency > 0)
-		{
-			_silenceCount = 0;
+		var noteResult = _noteAnalyzerService.Analyze(stableFrequency);
 
-			var isColdStart = _smoothedFrequency <= 0;
-			var isLargeJump = !isColdStart &&
-			                  Math.Abs(rawFrequency - _smoothedFrequency) / _smoothedFrequency > JumpThreshold;
-
-			if (isColdStart || isLargeJump)
-			{
-				if (_pendingFrequency > 0 && IsSimilar(rawFrequency, _pendingFrequency))
-				{
-					_smoothedFrequency = rawFrequency;
-					_pendingFrequency = 0;
-				}
-				else
-				{
-					_pendingFrequency = rawFrequency;
-				}
-			}
-			else
-			{
-				_smoothedFrequency = _smoothedFrequency * (1 - SmoothingAlpha) + rawFrequency * SmoothingAlpha;
-				_pendingFrequency = 0;
-			}
-		}
-		else if (_smoothedFrequency > 0)
-		{
-			_silenceCount++;
-			if (_silenceCount >= HoldCycles)
-			{
-				_smoothedFrequency = 0;
-				_pendingFrequency = 0;
-				_silenceCount = 0;
-			}
-		}
-		else
-		{
-			_pendingFrequency = 0;
-		}
-
-		var noteResult = _noteAnalyzerService.Analyze(_smoothedFrequency);
-
-		_logger.Log($"RMS={rms:F4} | RAW={rawFrequency:F2} Hz | SMOOTH={_smoothedFrequency:F2} Hz | " +
+		_logger.Log($"RMS={rms:F4} | RAW={rawFrequency:F2} Hz | SMOOTH={stableFrequency:F2} Hz | " +
 		            $"NOTA={noteResult.NoteName}{noteResult.Octave} | " +
 		            $"CENTS={noteResult.CentsDeviation:+0.0;-0.0;0} | {noteResult.Status}");
 
 		MainThread.BeginInvokeOnMainThread(() => UpdateUi(noteResult));
-	}
-
-	static bool IsSimilar(double a, double b)
-	{
-		if (b <= 0)
-			return false;
-
-		return Math.Abs(a - b) / b < SimilarityThreshold;
 	}
 
 	static double ComputeRms(byte[] pcmData)
@@ -178,6 +122,12 @@ public class TunerViewModel : INotifyPropertyChanged
 
 	void UpdateUi(NoteResult noteResult)
 	{
+		if (!double.IsNaN(TunerSettings.ForcedCentsForCalibration))
+		{
+			ApplyForcedCalibration();
+			return;
+		}
+
 		if (noteResult.FrequencyHz <= 0)
 		{
 			NoteText = "—";
@@ -195,18 +145,34 @@ public class TunerViewModel : INotifyPropertyChanged
 		CentsText = $"{noteResult.CentsDeviation:+0;-0;0}";
 
 		var targetAngle = MapCentsToAngle(noteResult.CentsDeviation);
-		_smoothedAngle = _smoothedAngle * (1 - AngleSmoothingAlpha) + targetAngle * AngleSmoothingAlpha;
+		_smoothedAngle = _smoothedAngle * (1 - TunerSettings.AngleSmoothingAlpha) +
+		                 targetAngle * TunerSettings.AngleSmoothingAlpha;
 		NeedleAngle = _smoothedAngle;
 	}
 
-	// Deadband: cand abaterea e foarte mica (acordat), fixam acul pe 0 ca sa nu mai tremure.
+	// Fortare pentru calibrare: ignora microfonul si fixeaza acul exact la centii din TunerSettings.
+	void ApplyForcedCalibration()
+	{
+		var forcedCents = TunerSettings.ForcedCentsForCalibration;
+		CentsText = $"{forcedCents:+0;-0;0}";
+		var angle = MapCentsToAngle(forcedCents);
+		_smoothedAngle = angle;
+		NeedleAngle = angle;
+	}
+
+	// Deadband: cand abaterea e foarte mica (acordat), fixam acul pe offset-ul de centru ca sa nu mai tremure.
 	static double MapCentsToAngle(double cents)
 	{
-		if (Math.Abs(cents) < CentsDeadband)
-			return 0;
+		if (Math.Abs(cents) < TunerSettings.CentsDeadband)
+			return TunerSettings.NeedleAngleOffsetDegrees;
 
-		var clampedCents = Math.Clamp(cents, -MaxCentsForNeedle, MaxCentsForNeedle);
-		return clampedCents / MaxCentsForNeedle * MaxNeedleAngleDegrees;
+		var clampedCents = Math.Clamp(cents, -TunerSettings.MaxCentsForNeedle, TunerSettings.MaxCentsForNeedle);
+		var span = clampedCents >= 0
+			? TunerSettings.MaxNeedleAnglePositiveDegrees
+			: TunerSettings.MaxNeedleAngleNegativeDegrees;
+
+		return TunerSettings.NeedleAngleOffsetDegrees +
+		       clampedCents / TunerSettings.MaxCentsForNeedle * span;
 	}
 
 	bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

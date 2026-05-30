@@ -4,9 +4,6 @@ namespace EasyGuitarTuner.Services;
 
 public class AudioCaptureService : IAudioCaptureService
 {
-	const int SampleRateHz = 44100;
-	const int TargetSampleCount = 16384; // ~371ms fereastra de analiza
-
 	readonly IAudioManager _audioManager;
 	readonly ISessionLogger _logger;
 	IAudioStreamer? _streamer;
@@ -17,7 +14,7 @@ public class AudioCaptureService : IAudioCaptureService
 
 	public bool IsCapturing => _streamer?.IsStreaming ?? false;
 
-	public int SampleRate => SampleRateHz;
+	public int SampleRate => TunerSettings.SampleRateHz;
 
 	public AudioCaptureService(IAudioManager audioManager, ISessionLogger logger)
 	{
@@ -33,11 +30,11 @@ public class AudioCaptureService : IAudioCaptureService
 		_streamer = _audioManager.CreateStreamer();
 		_streamer.Options.Channels = ChannelType.Mono;
 		_streamer.Options.BitDepth = BitDepth.Pcm16bit;
-		_streamer.Options.SampleRate = SampleRateHz;
+		_streamer.Options.SampleRate = TunerSettings.SampleRateHz;
 		_streamer.OnAudioCaptured += OnStreamerCaptured;
 
 		await _streamer.StartAsync();
-		_logger.Log($"CAPTURE START | SampleRate={SampleRateHz} Hz | Buffer={TargetSampleCount} esantioane");
+		_logger.Log($"CAPTURE START | SampleRate={TunerSettings.SampleRateHz} Hz | Buffer={TunerSettings.AnalysisWindowSamples} esantioane");
 	}
 
 	public async Task StopAsync()
@@ -63,7 +60,7 @@ public class AudioCaptureService : IAudioCaptureService
 		{
 			_sampleBuffer.AddRange(args.Audio);
 
-			var targetBytes = TargetSampleCount * 2; // 16-bit = 2 bytes per esantion
+			var targetBytes = TunerSettings.AnalysisWindowSamples * 2; // 16-bit = 2 bytes per esantion
 
 			if (_sampleBuffer.Count >= targetBytes)
 			{

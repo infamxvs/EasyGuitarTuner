@@ -8,21 +8,36 @@ Toate fisierele descrise in acest plan au fost create si compilate cu succes.
 
 ## Arhitectura generala
 
-Sunetul de la microfon este capturat continuu prin streaming. Chunk-urile PCM sunt acumulate intr-un buffer glisant. Algoritmul HPS (Harmonic Product Spectrum) bazat pe FFT detecteaza frecventa fundamentala. Aceasta este stabilizata printr-o logica de smoothing cu confirmare in 2 cicluri si hold time, apoi comparata cu notele standard ale chitarei.
+Sunetul de la microfon este capturat continuu prin streaming. Chunk-urile PCM sunt acumulate intr-un buffer glisant. Algoritmul HPS (Harmonic Product Spectrum) bazat pe FFT detecteaza frecventa fundamentala. Aceasta este stabilizata de un serviciu dedicat (filtru median pe 5 valori + EMA + hold time), apoi mapata pe cea mai apropiata nota cromatica (orice nota, orice acordaj).
 
 ```
 Microfon (Plugin.Maui.Audio IAudioStreamer)
     -> AudioCaptureService      (buffer glisant 16384 esantioane, suprapunere 50%)
-    -> PitchDetectorService     (RMS gate + Hann + FFT + HPS via MathNet -> Hz)
-    -> TunerViewModel           (confirmare 2 cicluri + EMA + hold time -> NoteResult)
-    -> NoteAnalyzerService      (nota + cents deviation)
-    -> MainPage                 (AnalogMeterView + afisaj 3 coloane: STANDARD/440Hz | nota+Hz | cents/CENTS)
+    -> PitchDetectorService     (RMS gate + Hann + FFT + HPS via MathNet -> Hz brut)
+    -> FrequencyStabilizer      (median pe 5 valori + EMA + hold time -> Hz stabil)
+    -> NoteAnalyzerService      (nota cromatica cea mai apropiata + cents in [-50, +50])
+    -> TunerViewModel           (deadband + EMA pe unghi -> NoteResult + NeedleAngle)
+    -> MainPage                 (AnalogMeterView cu animatie ac + afisaj 3 coloane: STANDARD/440Hz | nota+Hz | cents/CENTS)
     -> FileSessionLogger        (tuner-session.log)
 ```
 
 ---
 
 ## Fisiere existente
+
+### Configurare
+
+**`TunerSettings.cs`** — clasa statica, punct UNIC de reglaj pentru toti parametrii acordorului. Toate componentele citesc valorile de aici (nu mai exista `const` raspandite prin servicii). Grupuri:
+- **Captura audio**: `SampleRateHz` (44100), `AnalysisWindowSamples` (16384)
+- **Detectie pitch**: `NoiseFloorRms` (0.003 — pragul de volum de la care incepe analiza), `MinFrequencyHz` (60), `MaxFrequencyHz` (1000), `HarmonicCount` (5)
+- **Stabilizare frecventa**: `MedianWindow` (5), `FrequencySmoothingAlpha` (0.4), `JumpThreshold` (0.15), `HoldCycles` (3)
+- **Analiza nota**: `ReferencePitchHz` (440 — A4, referinta scala cromatica), `InTuneToleranceCents` (5.0)
+- **Afisaj / ac**: `CentsDeadband` (2.0), `AngleSmoothingAlpha` (0.6), `MaxCentsForNeedle` (50), `AngleLerpFactor` (0.3), `AngleSettleThreshold` (0.05), `FrameIntervalMs` (16)
+- **Calibrare unghi ac**: `NeedleAngleOffsetDegrees` (0 — unghiul acului la cents=0, regleaza centrul), `MaxNeedleAnglePositiveDegrees` (50 — grade pana la marcajul +50), `MaxNeedleAngleNegativeDegrees` (50 — grade, magnitudine, pana la marcajul -50)
+- **Calibrare grafica ac**: `PivotXFraction` (0.5), `PivotYFraction` (0.56)
+- **Test calibrare**: `ForcedCentsForCalibration` (`double.NaN` = detectie normala; orice valoare forteaza acul exact la acei centi, pentru verificare vizuala)
+
+Clasa e statica (referita direct, fara DI) ca sa fie accesibila uniform inclusiv din `AnalogMeterView`, care e instantiat din XAML, nu prin container. Valorile sunt `const` imutabile — se modifica in fisier si se reconstruieste aplicatia.
 
 ### Modele
 
@@ -52,21 +67,25 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 - Aplica **HPS (Harmonic Product Spectrum)** cu 5 armonice — detecteaza fundamentala, nu armonicele
 - **Corectie eroare de octava**: dupa HPS, compara peak-ul local (+/-2 bins) in jurul suboctavei (peakBin/2) cu peak-ul local in jurul peakBin; coboara octava doar daca suboctava are >= 60% din amplitudine
 - Interpolare parabolica sub-bin pentru precizie mai buna
-- Filtreaza in afara domeniului 70–1200 Hz
+- Filtreaza in afara domeniului 60–1000 Hz
+- Returneaza frecventa **bruta** (fara smoothing) — stabilizarea se face separat
+
+**`Services/IFrequencyStabilizer.cs`** + **`Services/FrequencyStabilizer.cs`**
+- Primeste frecventa bruta de la `PitchDetectorService` si returneaza o frecventa stabila
+- **Filtru median** pe ultimele 5 valori (`MedianWindow = 5`) — respinge outlierii izolati (armonice, erori de octava, artefacte); un glitch trebuie sa apara in >= 3 din 5 cicluri ca sa afecteze rezultatul
+- **EMA** (`SmoothingAlpha = 0.4`) peste mediana pentru netezirea variatiilor mici (vibrato/drift)
+- **Snap** la salt mare (`JumpThreshold = 0.15`): la schimbarea reala de coarda, comuta direct pe mediana (raspuns rapid)
+- **Hold time** (`HoldCycles = 3`): cand semnalul dispare, pastreaza ultima frecventa 2 cicluri vizibile, apoi reseteaza — crucial pentru coardele inalte cu decay scurt
+- `Reset()` curata starea (apelat la oprirea capturii)
+- Stateful, dar serviciu izolat (SRP) — usor de reglat fara sa atinga ViewModel-ul
 
 **`Services/INoteAnalyzerService.cs`** + **`Services/NoteAnalyzerService.cs`**
-- Tabel corzi standard:
-
-| Coarda | Nota | Frecventa |
-|--------|------|-----------|
-| 6      | E2   | 82.41 Hz  |
-| 5      | A2   | 110.00 Hz |
-| 4      | D3   | 146.83 Hz |
-| 3      | G3   | 196.00 Hz |
-| 2      | B3   | 246.94 Hz |
-| 1      | E4   | 329.63 Hz |
-
-- Calculeaza deviatia in cents: `cents = 1200 * log2(f_masurat / f_tinta)`
+- **Detectie cromatica** (nu mai exista tabel de corzi). Gaseste cea mai apropiata nota din scala egal temperata, indiferent de acordaj:
+  - `midi = round(69 + 12 * log2(f / ReferencePitchHz))` (A4 = 440 Hz)
+  - `f_tinta = ReferencePitchHz * 2^((midi - 69) / 12)`
+  - `NoteName = ["C","C#",...,"B"][midi % 12]`, `Octave = midi / 12 - 1`
+- Calculeaza deviatia in cents fata de nota cromatica cea mai apropiata: `cents = 1200 * log2(f_masurat / f_tinta)`. Matematic, rezultatul e mereu in **[-50, +50]** centi — la depasirea unei jumatati de semiton afisajul comuta automat pe nota vecina (ex: -60 centi fata de E2 → D# la +40 centi).
+- Functioneaza pentru orice acordaj (standard, Drop D, acordaj cu 2 semitonuri mai jos D2-G2-C3-F3-A3-D4 etc.) fiindca nu depinde de corzile chitarei
 - Prag InTune: < 5 cents | Galben: 5–15 cents | Rosu: > 15 cents
 
 **`Services/ISessionLogger.cs`** + **`Services/FileSessionLogger.cs`**
@@ -86,16 +105,13 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 - `FrequencyText`: ex `"247.6 Hz"` sau `"0.0 Hz"` cand nu se detecteaza
 - `CentsText`: deviatia rotunjita la intreg cu semn (ex: `"-1"`, `"+4"`); gol cand nu exista semnal
 - Se aboneaza la `OnAudioCaptured` din `AudioCaptureService`
-- Strategie de smoothing pe frecventa detectata (confirmare + EMA + hold):
-  - **Cold start / Saltea mare** (`|RAW - SMOOTH| / SMOOTH > 0.15`, JumpThreshold=0.15): noul RAW intra in `_pendingFrequency` — acul NU se misca inca. Doar daca urmatorul ciclu confirma cu o frecventa similara (`< 5%` diferenta, SimilarityThreshold=0.05), `SMOOTH = RAW` (snap). Filtreaza glitch-urile izolate de 1 ciclu.
-  - **Variatii mici** (sub 15%): EMA cu `SmoothingAlpha = 0.4` — raspuns rapid la vibrato/drift fara saltari abrupte.
-  - **Hold time** la linistire (RAW=0 si SMOOTH>0): incrementeaza `_silenceCount`. Cat timp e sub `HoldCycles = 3`, SMOOTH ramane neschimbat (acul si afisajul stau fixe pe ultima nota). La al 3-lea ciclu de liniste, reseteaza `SMOOTH = 0`, `_pendingFrequency = 0`, `_silenceCount = 0`. Crucial pentru coardele inalte (B3, E4) cu decay fizic scurt.
-  - Cost: ~200ms latenta la inceputul fiecarei note noi (confirmare) + ~400ms persistenta vizuala dupa atenuare (2 cicluri vizibile inainte de reset). Castig: glitch-uri eliminate si afisare suficient de lunga pentru toate cele 6 coarde (E4 trece de la ~200ms la ~1.2s afisaj).
-- Stabilizarea unghiului acului (peste smoothing-ul pe frecventa):
-  - **Deadband** (`CentsDeadband = 2.0`): cand `|cents| < 2`, unghiul tinta e fortat la 0 — acul sta fix pe centru cand coarda e acordata, fara micro-tremur.
+- Orchestreaza fluxul: `PitchDetectorService` (Hz brut) → `FrequencyStabilizer` (Hz stabil) → `NoteAnalyzerService` (nota + cents) → UI. Smoothing-ul pe frecventa nu mai e in ViewModel, ci in `FrequencyStabilizer`
+- Stabilizarea unghiului acului (peste frecventa deja stabilizata):
+  - **Deadband** (`CentsDeadband = 2.0`): cand `|cents| < 2`, unghiul tinta e fortat la `NeedleAngleOffsetDegrees` (centrul calibrat) — acul sta fix pe centru cand coarda e acordata, fara micro-tremur.
   - **EMA pe unghi** (`AngleSmoothingAlpha = 0.6`): unghiul tinta trimis spre control e netezit (`_smoothedAngle = _smoothedAngle * 0.4 + target * 0.6`), reducand jitter-ul rezidual din cents la frecvente joase. Resetat la 0 cand semnalul dispare.
 - Logheaza pentru fiecare ciclu si **RMS-ul real** (util pentru diagnoza)
-- `MapCentsToAngle`: aplica deadband, apoi clampeaza cents la [-50, +50] si mapeaza la unghi ac [-50, +50] grade (aliniat la marcajele cadranului)
+- `MapCentsToAngle`: aplica deadband, clampeaza cents la [-50, +50], apoi mapeaza liniar pe amplitudini **asimetrice** (`MaxNeedleAnglePositiveDegrees` pentru cents>0, `MaxNeedleAngleNegativeDegrees` pentru cents<0) plus `NeedleAngleOffsetDegrees` — aliniat la marcajele cadranului
+- **Mod calibrare** (`ApplyForcedCalibration`): cand `TunerSettings.ForcedCentsForCalibration` nu e `double.NaN`, ViewModel-ul ignora microfonul si fixeaza acul exact la centii ceruti — folosit pentru a verifica vizual corespondenta cents↔marcaje. Se readuce la `double.NaN` dupa calibrare
 - Orchestreaza `PitchDetectorService`, `NoteAnalyzerService` si `ISessionLogger`
 
 ---
@@ -135,6 +151,7 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 - `ISessionLogger` → `FileSessionLogger` (Singleton)
 - `IAudioCaptureService` → `AudioCaptureService` (Singleton)
 - `IPitchDetectorService` → `PitchDetectorService` (Singleton)
+- `IFrequencyStabilizer` → `FrequencyStabilizer` (Singleton)
 - `INoteAnalyzerService` → `NoteAnalyzerService` (Singleton)
 - `TunerViewModel` (Transient)
 - `MainPage` (Transient)
@@ -163,23 +180,29 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 
 | Fisier | Stare |
 |--------|-------|
+| `TunerSettings.cs` | Creat (punct unic de reglaj — toti parametrii) |
 | `Models/NoteResult.cs` | Creat |
 | `Services/IAudioCaptureService.cs` | Creat |
 | `Services/AudioCaptureService.cs` | Creat |
 | `Services/IPitchDetectorService.cs` | Creat |
 | `Services/PitchDetectorService.cs` | Creat |
+| `Services/IFrequencyStabilizer.cs` | Creat |
+| `Services/FrequencyStabilizer.cs` | Creat |
 | `Services/INoteAnalyzerService.cs` | Creat |
 | `Services/NoteAnalyzerService.cs` | Creat |
 | `Services/ISessionLogger.cs` | Creat |
 | `Services/FileSessionLogger.cs` | Creat |
-| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing + EMA + hold time; deadband pe cents + EMA pe unghi; unghi ac ±50° pentru ±50 centi; eliminat butonul — metode `StartAsync`/`StopAsync` in loc de `ToggleListeningCommand`) |
+| `ViewModels/TunerViewModel.cs` | Modificat (proprietati NoteText/OctaveText/CentsText pentru afisaj pe coloane; smoothing-ul pe frecventa mutat in `FrequencyStabilizer`; deadband pe cents + EMA pe unghi; unghi ac ±50° pentru ±50 centi; eliminat butonul — metode `StartAsync`/`StopAsync` in loc de `ToggleListeningCommand`) |
 | `Controls/AnalogMeterView.cs` | Modificat (grafica pe imagini: fundal + ac rotit din `Resources/Raw`; animatie lina a acului prin `IDispatcherTimer` la 60 FPS cu auto-stop in repaus) |
 | `Resources/Raw/background.png` | Creat (fundal cadran VU, 900×1950; include titlul si caseta neagra de afisaj desenate in imagine) |
 | `Resources/Raw/needle.png` | Creat (ac indicator, 20×284) |
 | `MainPage.xaml` | Modificat (afisaj pe 3 coloane `*,2*,*` la `0.5,0.73`; doar text peste caseta neagra din imagine, fara `Border`; etichete laterale culoare `#C9B68A`; eliminat butonul Start/Stop) |
 | `MainPage.xaml.cs` | Modificat (override `OnAppearing`/`OnDisappearing` pentru pornire/oprire automata a detectiei) |
-| `Services/PitchDetectorService.cs` | Modificat (prag RMS scazut la 0.003 pentru coarde subtiri) |
-| `MauiProgram.cs` | Modificat (fonts) |
+| `Services/PitchDetectorService.cs` | Modificat (returneaza Hz brut, fara smoothing; parametrii citesc din `TunerSettings`; domeniu 60–1000 Hz: B1 → G5) |
+| `Services/AudioCaptureService.cs` | Modificat (parametrii citesc din `TunerSettings`) |
+| `Services/FrequencyStabilizer.cs` | Modificat (parametrii citesc din `TunerSettings`) |
+| `Services/NoteAnalyzerService.cs` | Modificat (detectie cromatica via formula MIDI — nota cea mai apropiata + cents in [-50,+50]; inlocuieste tabelul de 6 corzi standard; suporta orice acordaj) |
+| `MauiProgram.cs` | Modificat (fonts; inregistrat `IFrequencyStabilizer`) |
 | `App.xaml.cs` | Modificat (DI + fereastra fixa 249x540 pe Windows) |
 | `AppShell.xaml.cs` | Modificat (DI) |
 | `AppShell.xaml` | Modificat (golita, continut din code-behind) |
@@ -283,23 +306,28 @@ Folderele excluse din backup (`bin`, `obj`, `.vs`, `.git`, `packages`) se regene
 
 ## Note tehnice pentru conversatii viitoare
 
+- **Reglaje centralizate in `TunerSettings`**: toti parametrii reglabili (prag volum, range Hz, armonice, median, EMA, jump, hold, deadband, animatie ac, pivot etc.) sunt `const` intr-o singura clasa statica `TunerSettings`. Serviciile si controalele NU mai detin constante proprii — citesc de acolo. Pentru orice ajustare se modifica un singur fisier. Clasa e statica (nu prin DI) pentru ca trebuie accesibila si din `AnalogMeterView` (control XAML, neinjectabil prin container). Daca pe viitor se vrea un ecran de Setari in aplicatie, se transforma in POCO injectat cu proprietati.
+- **Pragul de volum (start analiza)**: `TunerSettings.NoiseFloorRms`. Folosit in `PitchDetectorService.HasEnoughSignal` — sub acest RMS detectorul returneaza 0 (liniste). Mai mare = ignora sunete slabe (mai putine false detectii, dar coardele cu decay pot disparea mai repede); mai mic = mai sensibil.
 - **HPS vs FFT simplu**: HPS (Harmonic Product Spectrum) inmulteste spectrul FFT cu versiunile sale comprimate la 1/2, 1/3, 1/4, 1/5. Fundamentala iese in evidenta deoarece coincide cu propriile armonice la toate compresiile. Fara HPS, FFT simplu detecta uneori E3 in loc de E2.
 - **Corectie octava in HPS**: HPS poate detecta prima armonica (octava superioara) cand aceasta e mai puternica decat fundamentala (frecvent la D3, G3). Fix: dupa gasirea peak-ului HPS, cautam peak local in fereastra +/-2 bins in jurul `peakBin/2` (acopera leakage spectral) si comparam cu peak local in jurul `peakBin`. Coboram octava doar daca suboctava are >= 60% din amplitudine. Pragul mare (60%) si fereastra de cautare evita falsele coborari cauzate de zgomot sau leakage spectral — important pentru B3 (247 Hz) unde un prag mic ar coboara fals la B2 (123 Hz).
 - **Suprapunere buffer**: bufferul glisant pastreaza 50% din datele anterioare la fiecare ciclu. Aceasta reduce artefactele de granita si mentine receptivitatea.
-- **Strategie smoothing (3 mecanisme combinate)**:
-  1. **Confirmare in 2 cicluri** la cold-start sau saltea mare (>15%): RAW nou intra in `_pendingFrequency`, acul nu se misca. Doar dupa ce ciclul urmator confirma o frecventa similara (<5% diferenta) cu pending-ul, comutam `SMOOTH = RAW`. Filtreaza glitch-uri izolate (ex: un ciclu cu RAW=97 Hz urmat de RAW=196 Hz stabil → glitch-ul ignorat).
-  2. **EMA** (`smooth = smooth * 0.6 + raw * 0.4`) pentru variatii sub 15% — raspuns rapid la vibrato/drift fara saltari.
-  3. **Hold time** (`HoldCycles = 3`) cand RAW=0: SMOOTH ramane neschimbat pentru 2 cicluri vizibile (~400ms), apoi al 3-lea ciclu reseteaza la 0. Crucial pentru coardele inalte (B3, E4) care au decay fizic foarte scurt — fara hold, E4 ar dispărea instant dupa 1 ciclu de detectie.
+- **Strategie smoothing pe frecventa (in `FrequencyStabilizer`, 3 mecanisme)**:
+  1. **Filtru median** pe ultimele 5 valori brute (`MedianWindow = 5`): mediana e robusta la outlieri — un artefact izolat (armonica, eroare de octava, zgomot) nu o afecteaza pentru ca difera de centru. E nevoie de >= 3 din 5 valori consecvent diferite ca mediana sa se mute. Asta a inlocuit vechea confirmare in 2 cicluri si rezolva "acul sare la pozitii departate de nota".
+  2. **EMA** (`smooth = smooth * 0.6 + median * 0.4`) peste mediana pentru variatii mici — netezeste vibrato/drift. La salt mare (>15%, schimbare reala de coarda) face snap direct pe mediana pentru raspuns rapid.
+  3. **Hold time** (`HoldCycles = 3`) cand RAW=0: frecventa ramane neschimbata 2 cicluri vizibile (~400ms), apoi al 3-lea ciclu reseteaza la 0. Crucial pentru coardele inalte (B3, E4) care au decay fizic foarte scurt — fara hold, E4 ar dispărea instant dupa 1 ciclu de detectie.
+  - De ce median + EMA (nu doar EMA): EMA *amesteca* outlierul in rezultat (trage acul), pe cand mediana il *ignora*. Combinatia da si respingere de artefacte (median) si netezire fina (EMA).
 - **Stabilizare + animatie ac (2 niveluri)**: detectorul produce doar ~5 valori/secunda, deci miscarea directa a acului ar fi sacadata. Solutia are doua straturi complementare:
   1. **Nivel valoare (TunerViewModel)**: deadband pe cents (`< 2` centi → unghi 0, opreste tremurul cand e acordat) + EMA pe unghi (`AngleSmoothingAlpha = 0.6`) ca sa stabilizeze *unde* trebuie sa ajunga acul.
   2. **Nivel miscare (AnalogMeterView)**: `IDispatcherTimer` la 60 FPS interpoleaza lin unghiul desenat spre tinta (`AngleLerpFactor = 0.3`), deci acul *gliseaza* intre valori in loc sa teleporteze.
 - **Buget mobil pentru animatie**: timer-ul de 60 FPS din `AnalogMeterView` porneste cand se schimba unghiul tinta si se **opreste automat** cand acul a ajuns (`AngleSettleThreshold = 0.05`). Astfel redesenarea costisitoare ruleaza doar in timpul tranzitiilor (cand canti), nu permanent — esential pentru baterie/CPU pe telefoane. Evita orice loop de animatie always-on.
 - **Sample rate asumat**: 44100 Hz pe toate platformele. Daca microfonul Windows ruleaza nativ la 48000 Hz si plugin-ul nu onoreaza setarea, frecventele vor aparea cu ~8.8% mai mari decat real — verificabil din `tuner-session.log` (CENTS constant mare la o coarda cunoscuta).
-- **Range ac ±50 centi**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 si mapeaza la ±50° (`MaxCentsForNeedle = 50`, `MaxNeedleAngleDegrees = 50`), aliniat la marcaje.
+- **Range ac ±50 centi (calibrare asimetrica)**: cadranul desenat (`background.png`) are marcaje `-50 ... 0 ... +50`. `TunerViewModel.MapCentsToAngle` clampeaza cents la ±50 (`MaxCentsForNeedle = 50`) si mapeaza separat pe fiecare capat: `MaxNeedleAnglePositiveDegrees` (grade spre +50) si `MaxNeedleAngleNegativeDegrees` (grade spre -50), plus `NeedleAngleOffsetDegrees` pentru pozitia exacta a centrului. Cele doua amplitudini sunt separate fiindca grafica nu e neaparat simetrica — se regleaza vizual cu ajutorul `ForcedCentsForCalibration`.
 - **Grafica pe imagini (AnalogMeterView)**: in loc de desen procedural, controlul incarca `background.png` si `needle.png` din `Resources/Raw` ca `SKImage` (o singura data, cache). Fundalul e scalat "contain" si centrat. Acul e desenat peste fundal cu transformarea `Translate(pivot) → Scale(scale) → RotateDegrees(NeedleAngle) → DrawImage(needle, -needleW/2, -needleH)`, deci pivotul de rotatie e baza acului. Pozitia pivotului in cadran = `PivotXFraction`/`PivotYFraction` (fractii din imagine), reglabile vizual.
 - **De ce Resources/Raw si nu MauiImage**: imaginile trebuie pastrate la rezolutia reala (acul e deja la scara corecta fata de fundal). `MauiImage` ar aplica rescalare dupa DPI si ar strica raportul. `MauiAsset` (folderul `Resources/Raw`) pastreaza fisierul pixel-perfect, incarcabil cu `FileSystem.OpenAppPackageFileAsync`.
 - **Caseta de afisaj e parte din imagine**: noua imagine de fundal include deja caseta neagra de afisaj (si titlul) desenate. In XAML NU se mai deseneaza niciun `Border` — peste fundal se aseaza doar text (nota/frecventa centrate peste caseta neagra). Sursa imaginii editate e in `Images/background_1950_900.png`; pentru a o folosi se copiaza peste `Resources/Raw/background.png` (acelasi nume de asset folosit de `AnalogMeterView`). Daca pozitia casetei sau a cadranului se schimba la o editare viitoare, se recalibreaza `LayoutBounds` din `MainPage.xaml` (centrul randului de afisaj, acum `0.5,0.73`) si pivotul acului din `AnalogMeterView.cs`.
-- **Calibrare pivot/unghi**: `PivotXFraction = 0.5`, `PivotYFraction = 0.56` si `MaxNeedleAngleDegrees = 50` sunt valorile validate vizual — baza acului sta pe pivotul fizic al cadranului si varful atinge `±50` pe marcaje. Daca se schimba imaginea de fundal, aceste valori trebuie recalibrate.
+- **Calibrare pivot/unghi**: `PivotXFraction = 0.5`, `PivotYFraction = 0.56`, `NeedleAngleOffsetDegrees`, `MaxNeedleAnglePositiveDegrees` si `MaxNeedleAngleNegativeDegrees` sunt valorile validate vizual — baza acului sta pe pivotul fizic al cadranului, centrul cade pe `0` si varful atinge `+50`/`-50` pe marcaje. Procedura: setezi `ForcedCentsForCalibration` pe rand la `+50`, `-50`, `0`, faci screenshot si ajustezi amplitudinile/offset-ul pana coincid cu marcajele. Daca se schimba imaginea de fundal, aceste valori trebuie recalibrate.
 - **Hold time vs decay fizic**: coardele subtiri (B3 = 247 Hz, E4 = 330 Hz) au timp de decay fizic de ~3x mai scurt decat coardele groase (E2 = 82 Hz). Fara hold time, E4 ar fi afisat doar 200ms inainte ca RMS sa scada sub prag. Combinatia "prag RMS scazut la 0.003 + hold de 3 cicluri" extinde afisarea E4 de la ~200ms la ~1.2s, suficient pentru utilizator sa citeasca cents-urile.
 - **Raport de aspect 19.5:9**: aplicatia este blocata in portret pe Android (atribut `ScreenOrientation.Portrait` in `MainActivity`) si iOS (doar `UIInterfaceOrientationPortrait` in `Info.plist`). Pe Windows, fereastra este fixata la 249×540 pixeli (540/249 ≈ 2.169 ≈ 19.5:9) prin `CreateWindow` in `App.xaml.cs` cu `MinimumWidth = MaximumWidth = 249` si `MinimumHeight = MaximumHeight = 540`. Utilizatorul nu poate redimensiona fereastra pe Windows.
 - **Cum sa setezi NavBarIsVisible**: pentru a ascunde bara purpurie cu titlul aplicatiei (cand pagina e gazduita in Shell), foloseste `Shell.NavBarIsVisible="False"` pe `ContentPage` in XAML. Important pentru un look complet curat fara header.
+- **Detectie cromatica (nu tabel de corzi)**: `NoteAnalyzerService` nu mai compara frecventa cu cele 6 corzi standard, ci o mapeaza pe cea mai apropiata nota din scala egal temperata prin formula MIDI (`midi = round(69 + 12*log2(f/440))`, `f_tinta = 440*2^((midi-69)/12)`). Avantaje: (1) afiseaza orice nota cromatica (D#, F#, C etc.), nu doar E/A/D/G/B; (2) centii sunt mereu in [-50, +50] fiindca se raporteaza la nota cea mai apropiata — cand depasesti jumatate de semiton, afisajul comuta automat pe nota vecina (-60 centi fata de E2 → D# la +40 centi); (3) suporta orice acordaj (Drop D, acordaj cu 2 semitonuri mai jos D2-G2-C3-F3-A3-D4) fara configurare. Referinta A4 e `TunerSettings.ReferencePitchHz` (440 Hz), reglabila pentru acordaje cu referinta diferita (ex: 432 Hz).
+- **Domeniul de detectie 60–1000 Hz** (`MinFrequencyHz` / `MaxFrequencyHz`): ales ca sa acopere de la B1 (61.74 Hz — coarda joasa de chitara cu 7 corzi / bas) pana la G5 (783.99 Hz). Limita de jos 60 Hz sta putin sub B1 si lasa un tampon fata de hum-ul de retea de 50 Hz (in Romania), evitand detectii false din bazaitul electric. Limita de sus 1000 Hz prinde G5 inclusiv cand e +50 centi (~807 Hz) cu marja pentru cautarea peak-ului, dar taie zona inalta inutila (mai putine sanse sa agati o armonica drept fundamentala). Daca se vrea o coarda mai joasa (B0 = 30.87 Hz) sau note mai inalte, se ajusteaza cele doua constante. La frecvente joase rezolutia FFT e mai groasa (bin ≈ 2.69 Hz la fereastra de 16384), dar interpolarea parabolica din `RefinePeakBin` compenseaza; daca B1 devine imprecis, se poate mari `AnalysisWindowSamples` la 32768 (precizie dubla jos, latenta dubla).

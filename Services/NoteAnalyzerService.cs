@@ -4,15 +4,12 @@ namespace EasyGuitarTuner.Services;
 
 public class NoteAnalyzerService : INoteAnalyzerService
 {
-	readonly (string NoteName, int Octave, double FrequencyHz)[] _guitarStrings =
+	static readonly string[] NoteNames =
 	[
-		("E", 2, 82.41),
-		("A", 2, 110.00),
-		("D", 3, 146.83),
-		("G", 3, 196.00),
-		("B", 3, 246.94),
-		("E", 4, 329.63)
+		"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
 	];
+
+	const int MidiNoteForA4 = 69;
 
 	public NoteResult Analyze(double frequencyHz)
 	{
@@ -28,35 +25,28 @@ public class NoteAnalyzerService : INoteAnalyzerService
 			};
 		}
 
-		var closestString = _guitarStrings[0];
-		var smallestDifference = Math.Abs(frequencyHz - closestString.FrequencyHz);
+		var midiNote = (int)Math.Round(MidiNoteForA4 + 12 * Math.Log2(frequencyHz / TunerSettings.ReferencePitchHz));
+		var targetFrequency = ChromaticFrequency(midiNote);
 
-		foreach (var guitarString in _guitarStrings)
-		{
-			var difference = Math.Abs(frequencyHz - guitarString.FrequencyHz);
-			if (difference < smallestDifference)
-			{
-				smallestDifference = difference;
-				closestString = guitarString;
-			}
-		}
-
-		var cents = 1200 * Math.Log(frequencyHz / closestString.FrequencyHz, 2);
+		var cents = 1200 * Math.Log2(frequencyHz / targetFrequency);
 		var status = GetTuningStatus(cents);
 
 		return new NoteResult
 		{
-			NoteName = closestString.NoteName,
-			Octave = closestString.Octave,
+			NoteName = NoteNames[((midiNote % 12) + 12) % 12],
+			Octave = midiNote / 12 - 1,
 			FrequencyHz = frequencyHz,
 			CentsDeviation = cents,
 			Status = status
 		};
 	}
 
+	static double ChromaticFrequency(int midiNote) =>
+		TunerSettings.ReferencePitchHz * Math.Pow(2, (midiNote - MidiNoteForA4) / 12.0);
+
 	static TuningStatus GetTuningStatus(double cents)
 	{
-		if (Math.Abs(cents) < 5)
+		if (Math.Abs(cents) < TunerSettings.InTuneToleranceCents)
 			return TuningStatus.InTune;
 
 		return cents < 0 ? TuningStatus.Flat : TuningStatus.Sharp;
