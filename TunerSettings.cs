@@ -1,18 +1,38 @@
 namespace EasyGuitarTuner;
 
+// Algoritmul de detectie a frecventei fundamentale. Schimba ActivePitchAlgorithm si reconstruieste.
+public enum PitchAlgorithm
+{
+	Hps, // Harmonic Product Spectrum (spectral, FFT) — algoritmul curent
+	Yin  // YIN (domeniul timpului) — alternativ
+}
+
 // Punct unic de reglaj pentru toti parametrii acordorului.
 // Modifica valorile aici si reconstruieste aplicatia (dotnet build).
 public static class TunerSettings
 {
-	// --- Captura audio ---
-	public const int SampleRateHz = 48000; // rata nativa pe majoritatea telefoanelor Android/iOS (evita resampling)
-	public const int AnalysisWindowSamples = 32768; // fereastra FFT (~683ms la 48000 Hz) — precizie mai buna jos (E2) (~3 analize/sec)
+	// --- Comutator algoritm detectie (la compilare) ---
+	// Alege ce detector ruleaza. Schimba valoarea si reconstruieste aplicatia.
+	public const PitchAlgorithm ActivePitchAlgorithm = PitchAlgorithm.Yin;
+	//public const PitchAlgorithm ActivePitchAlgorithm = PitchAlgorithm.Hps;
 
-	// --- Detectie pitch --- 
-	public const double NoiseFloorRms = 0.001; // pragul de VOLUM de la care incepe analiza (mai mare = ignora sunete slabe)
+	// --- Captura audio (comun ambilor algoritmi) ---
+	public const int SampleRateHz = 48000; // rata nativa pe majoritatea telefoanelor Android/iOS (evita resampling)
+	public const int AnalysisWindowSamples = 32768; // fereastra de captura (~683ms la 48000 Hz); YIN foloseste doar un subset (YinWindowSamples)
+
+	// --- Detectie pitch HPS (algoritmul curent) ---
+	public const double NoiseFloorRms = 0.001; // pragul de VOLUM de la care incepe analiza (comun ambilor algoritmi)
 	public const double MinFrequencyHz = 60; // putin sub B1 (61.74 Hz); tampon fata de hum-ul de 50 Hz
 	public const double MaxFrequencyHz = 1000; // peste G5 (783.99 Hz) cu marja pentru +50 centi
 	public const int HarmonicCount = 7; // armonice folosite de HPS
+
+	// --- Detectie pitch YIN (alternativ, total independent de HPS) ---
+	// Activ doar cand ActivePitchAlgorithm = PitchAlgorithm.Yin. Pragul de volum se reia din NoiseFloorRms (comun).
+	public const int YinWindowSamples = 4096; // recomandat 2048-4096; 4096 acopera >= 2 perioade din E2 (82 Hz) la 48 kHz, echilibru precizie/latenta
+	public const double YinThreshold = 0.10; // valoarea canonica din lucrarea de Cheveigne (2002); 0.10-0.15 uzual, creste spre 0.15 in medii zgomotoase
+	public const double YinMinFrequencyHz = 60; // limita de jos a cautarii (tau maxim)
+	public const double YinMaxFrequencyHz = 1000; // limita de sus a cautarii (tau minim)
+	public const double YinAperiodicityCutoff = 0.80; // gate de zgomot: dip > 0.80 (claritate < 20%) => semnal neperiodic, fara nota
 
 	// --- Stabilizare frecventa ---
 	public const int MedianWindow = 10; // cate valori brute intra in filtrul median (respinge outlieri)

@@ -23,7 +23,7 @@ public static class MauiProgram
 
 		builder.Services.AddSingleton<ISessionLogger, FileSessionLogger>();
 		builder.Services.AddSingleton<IAudioCaptureService, AudioCaptureService>();
-		builder.Services.AddSingleton<IPitchDetectorService, PitchDetectorService>();
+		RegisterPitchDetector(builder.Services);
 		builder.Services.AddSingleton<IFrequencyStabilizer, FrequencyStabilizer>();
 		builder.Services.AddSingleton<INoteAnalyzerService, NoteAnalyzerService>();
 		builder.Services.AddTransient<TunerViewModel>();
@@ -35,5 +35,17 @@ public static class MauiProgram
 #endif
 
 		return builder.Build();
+	}
+
+	// Inregistreaza detectorul ales in TunerSettings.ActivePitchAlgorithm.
+	// Variabila locala evita avertismentul de cod inaccesibil la compararea unei constante.
+	static void RegisterPitchDetector(IServiceCollection services)
+	{
+		var algorithm = TunerSettings.ActivePitchAlgorithm;
+
+		if (algorithm == PitchAlgorithm.Yin)
+			services.AddSingleton<IPitchDetectorService, YinPitchDetectorService>();
+		else
+			services.AddSingleton<IPitchDetectorService, PitchDetectorService>();
 	}
 }

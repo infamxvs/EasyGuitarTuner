@@ -8,13 +8,15 @@ Toate fisierele descrise in acest plan au fost create si compilate cu succes.
 
 ## Arhitectura generala
 
-Sunetul de la microfon este capturat continuu prin streaming. Chunk-urile PCM sunt acumulate intr-un buffer glisant. Algoritmul HPS (Harmonic Product Spectrum) bazat pe FFT detecteaza frecventa fundamentala. Aceasta este stabilizata de un serviciu dedicat (filtru median pe 5 valori + EMA + hold time), apoi mapata pe cea mai apropiata nota cromatica (orice nota, orice acordaj).
+Sunetul de la microfon este capturat continuu prin streaming. Chunk-urile PCM sunt acumulate intr-un buffer glisant. Detectia frecventei fundamentale se face printr-unul din doi algoritmi interschimbabili la compilare (`TunerSettings.ActivePitchAlgorithm`): HPS (Harmonic Product Spectrum, spectral/FFT — implicit) sau YIN (domeniul timpului — alternativ). Frecventa bruta este stabilizata de un serviciu dedicat (filtru median + EMA + snap), apoi mapata pe cea mai apropiata nota cromatica (orice nota, orice acordaj).
 
 ```
 Microfon (Plugin.Maui.Audio IAudioStreamer)
-    -> AudioCaptureService      (buffer glisant 16384 esantioane, suprapunere 50%)
-    -> PitchDetectorService     (RMS gate + Hann + FFT + HPS via MathNet -> Hz brut)
-    -> FrequencyStabilizer      (median pe 5 valori + EMA + hold time -> Hz stabil)
+    -> AudioCaptureService      (buffer glisant, suprapunere 50%)
+    -> IPitchDetectorService    (comutabil la compilare):
+         - PitchDetectorService    (HPS: RMS gate + Hann + FFT + HPS via MathNet -> Hz brut)
+         - YinPitchDetectorService (YIN: difference function + CMNDF + prag + interpolare parabolica -> Hz brut)
+    -> FrequencyStabilizer      (median + EMA + snap -> Hz stabil)
     -> NoteAnalyzerService      (nota cromatica cea mai apropiata + cents in [-50, +50])
     -> TunerViewModel           (deadband + EMA pe unghi -> NoteResult + NeedleAngle)
     -> MainPage                 (AnalogMeterView cu animatie ac + afisaj 3 coloane: STANDARD/440Hz | nota+Hz | cents/CENTS)
@@ -27,9 +29,11 @@ Microfon (Plugin.Maui.Audio IAudioStreamer)
 
 ### Configurare
 
-**`TunerSettings.cs`** — clasa statica, punct UNIC de reglaj pentru toti parametrii acordorului. Toate componentele citesc valorile de aici (nu mai exista `const` raspandite prin servicii). Grupuri:
-- **Captura audio**: `SampleRateHz` (48000), `AnalysisWindowSamples` (32768)
-- **Detectie pitch**: `NoiseFloorRms` (0.003 — pragul de volum de la care incepe analiza), `MinFrequencyHz` (60), `MaxFrequencyHz` (1000), `HarmonicCount` (6)
+**`TunerSettings.cs`** — clasa statica, punct UNIC de reglaj pentru toti parametrii acordorului. Toate componentele citesc valorile de aici (nu mai exista `const` raspandite prin servicii). Contine si `enum PitchAlgorithm { Hps, Yin }`. Grupuri:
+- **Comutator algoritm**: `ActivePitchAlgorithm` (`PitchAlgorithm.Hps` implicit) — alege detectorul; se schimba si se reconstruieste aplicatia
+- **Captura audio (comun)**: `SampleRateHz` (48000), `AnalysisWindowSamples` (32768)
+- **Detectie pitch HPS**: `NoiseFloorRms` (pragul de volum, COMUN ambilor algoritmi), `MinFrequencyHz` (60), `MaxFrequencyHz` (1000), `HarmonicCount` (7)
+- **Detectie pitch YIN (alternativ)**: `YinWindowSamples` (4096 — subset din buffer), `YinThreshold` (0.10 — pragul CMNDF canonic de Cheveigne), `YinMinFrequencyHz` (60), `YinMaxFrequencyHz` (1000), `YinAperiodicityCutoff` (0.80 — peste atat dip-ul => semnal neperiodic, fara nota)
 - **Stabilizare frecventa**: `MedianWindow` (5), `FrequencySmoothingAlpha` (0.4), `JumpThreshold` (0.15), `HoldCycles` (3)
 - **Analiza nota**: `ReferencePitchHz` (440 — A4, referinta scala cromatica), `InTuneToleranceCents` (5.0)
 - **Afisaj / ac**: `CentsDeadband` (2.0), `AngleSmoothingAlpha` (0.6), `MaxCentsForNeedle` (50), `AngleLerpFactor` (0.3), `AngleSettleThreshold` (0.05), `FrameIntervalMs` (16)
@@ -69,6 +73,16 @@ Clasa e statica (referita direct, fara DI) ca sa fie accesibila uniform inclusiv
 - Interpolare parabolica sub-bin pentru precizie mai buna
 - Filtreaza in afara domeniului 60–1000 Hz
 - Returneaza frecventa **bruta** (fara smoothing) — stabilizarea se face separat
+
+**`Services/YinPitchDetectorService.cs`** (detector alternativ, implementeaza tot `IPitchDetectorService`)
+- Algoritmul **YIN** (de Cheveigne & Kawahara, 2002), in domeniul timpului — total independent de HPS, nu il modifica
+- Foloseste doar ultimele `YinWindowSamples` (4096) esantioane din bufferul de captura (Optiunea 1: captura ramane neatinsa)
+- Prag RMS (`NoiseFloorRms`, comun) → ignora linistea
+- **Difference function** + **CMNDF** (cumulative mean normalized difference, `cmndf[0]=1`) — reduce drastic erorile de octava fara euristici
+- **Prag absolut** (`YinThreshold`): primul dip sub prag, urmarit pana la minimul local; daca niciunul, ia minimul global
+- **Gate de aperiodicitate** (`YinAperiodicityCutoff`): daca dip-ul ales e prea mare, semnalul e neperiodic → returneaza 0
+- **Interpolare parabolica** pe tau pentru precizie sub-esantion → `frecventa = sampleRate / tau`
+- Se activeaza din `TunerSettings.ActivePitchAlgorithm = PitchAlgorithm.Yin` (inregistrare DI in `MauiProgram`)
 
 **`Services/IFrequencyStabilizer.cs`** + **`Services/FrequencyStabilizer.cs`**
 - Primeste frecventa bruta de la `PitchDetectorService` si returneaza o frecventa stabila
@@ -150,7 +164,7 @@ Clasa e statica (referita direct, fara DI) ca sa fie accesibila uniform inclusiv
 **`MauiProgram.cs`**
 - `ISessionLogger` → `FileSessionLogger` (Singleton)
 - `IAudioCaptureService` → `AudioCaptureService` (Singleton)
-- `IPitchDetectorService` → `PitchDetectorService` (Singleton)
+- `IPitchDetectorService` → `PitchDetectorService` (HPS) sau `YinPitchDetectorService` (YIN), in functie de `TunerSettings.ActivePitchAlgorithm` (Singleton) — inregistrare prin `RegisterPitchDetector`
 - `IFrequencyStabilizer` → `FrequencyStabilizer` (Singleton)
 - `INoteAnalyzerService` → `NoteAnalyzerService` (Singleton)
 - `TunerViewModel` (Transient)
@@ -185,7 +199,8 @@ Clasa e statica (referita direct, fara DI) ca sa fie accesibila uniform inclusiv
 | `Services/IAudioCaptureService.cs` | Creat |
 | `Services/AudioCaptureService.cs` | Creat |
 | `Services/IPitchDetectorService.cs` | Creat |
-| `Services/PitchDetectorService.cs` | Creat |
+| `Services/PitchDetectorService.cs` | Creat (HPS — neatins de adaugarea YIN) |
+| `Services/YinPitchDetectorService.cs` | Creat (detector alternativ YIN, independent) |
 | `Services/IFrequencyStabilizer.cs` | Creat |
 | `Services/FrequencyStabilizer.cs` | Creat |
 | `Services/INoteAnalyzerService.cs` | Creat |
@@ -202,7 +217,8 @@ Clasa e statica (referita direct, fara DI) ca sa fie accesibila uniform inclusiv
 | `Services/AudioCaptureService.cs` | Modificat (parametrii citesc din `TunerSettings`) |
 | `Services/FrequencyStabilizer.cs` | Modificat (parametrii citesc din `TunerSettings`) |
 | `Services/NoteAnalyzerService.cs` | Modificat (detectie cromatica via formula MIDI — nota cea mai apropiata + cents in [-50,+50]; inlocuieste tabelul de 6 corzi standard; suporta orice acordaj) |
-| `MauiProgram.cs` | Modificat (fonts; inregistrat `IFrequencyStabilizer`) |
+| `MauiProgram.cs` | Modificat (fonts; `RegisterPitchDetector` alege HPS/YIN dupa `ActivePitchAlgorithm`) |
+| `TunerSettings.cs` | Modificat (enum `PitchAlgorithm`; comutator `ActivePitchAlgorithm`; zona separata de parametri YIN) |
 | `App.xaml.cs` | Modificat (DI + fereastra fixa 249x540 pe Windows) |
 | `AppShell.xaml.cs` | Modificat (DI) |
 | `AppShell.xaml` | Modificat (golita, continut din code-behind) |
@@ -306,6 +322,7 @@ Folderele excluse din backup (`bin`, `obj`, `.vs`, `.git`, `packages`) se regene
 
 ## Note tehnice pentru conversatii viitoare
 
+- **Doi detectori interschimbabili (HPS si YIN)**: ambii implementeaza `IPitchDetectorService` si returneaza Hz brut, deci restul lantului (stabilizator, analiza nota, UI) e identic indiferent de algoritm. Selectia se face la compilare din `TunerSettings.ActivePitchAlgorithm`; `MauiProgram.RegisterPitchDetector` inregistreaza implementarea corecta in DI (copiaza const-ul intr-o variabila locala ca sa evite avertismentul de cod inaccesibil). HPS-ul (`PitchDetectorService`) e neatins de adaugarea YIN — sunt complet independenti. Scop: testarea ambelor abordari si alegerea finala. YIN foloseste doar ultimele `YinWindowSamples` esantioane din bufferul de captura (Optiunea 1), deci `AudioCaptureService` ramane neschimbat. YIN e O(N²) pe fereastra lui — de aceea fereastra e mica (4096) fata de cea de 32768 a HPS; trebuie sa ramana >= ~4 perioade din nota cea mai joasa (la 60 Hz, perioada ≈ 800 esantioane, deci 4096 e suficient).
 - **Reglaje centralizate in `TunerSettings`**: toti parametrii reglabili (prag volum, range Hz, armonice, median, EMA, jump, hold, deadband, animatie ac, pivot etc.) sunt `const` intr-o singura clasa statica `TunerSettings`. Serviciile si controalele NU mai detin constante proprii — citesc de acolo. Pentru orice ajustare se modifica un singur fisier. Clasa e statica (nu prin DI) pentru ca trebuie accesibila si din `AnalogMeterView` (control XAML, neinjectabil prin container). Daca pe viitor se vrea un ecran de Setari in aplicatie, se transforma in POCO injectat cu proprietati.
 - **Pragul de volum (start analiza)**: `TunerSettings.NoiseFloorRms`. Folosit in `PitchDetectorService.HasEnoughSignal` — sub acest RMS detectorul returneaza 0 (liniste). Mai mare = ignora sunete slabe (mai putine false detectii, dar coardele cu decay pot disparea mai repede); mai mic = mai sensibil.
 - **HPS vs FFT simplu**: HPS (Harmonic Product Spectrum) inmulteste spectrul FFT cu versiunile sale comprimate la 1/2, 1/3, 1/4, 1/5. Fundamentala iese in evidenta deoarece coincide cu propriile armonice la toate compresiile. Fara HPS, FFT simplu detecta uneori E3 in loc de E2.
