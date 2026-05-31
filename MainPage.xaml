@@ -43,20 +43,32 @@
                     <Label.FormattedText>
                         <FormattedString>
                             <Span Text="{Binding NoteText}"
-                                  FontSize="34"
+                                  FontSize="20"
                                   FontAttributes="Bold"
-                                  TextColor="#F2A640" />
+                                  TextColor="{Binding NoteColor}" />
                             <Span Text="{Binding OctaveText}"
-                                  FontSize="16"
+                                  FontSize="10"
                                   FontAttributes="Bold"
-                                  TextColor="#F2A640" />
+                                  TextColor="{Binding NoteColor}" />
+                            <Span Text="{Binding NoteSeparatorText}"
+                                  FontSize="20"
+                                  FontAttributes="Bold"
+                                  TextColor="{Binding NoteColor}" />
+                            <Span Text="{Binding LatinNoteText}"
+                                  FontSize="20"
+                                  FontAttributes="Bold"
+                                  TextColor="{Binding NoteColor}" />
+                            <Span Text="{Binding OctaveText}"
+                                  FontSize="10"
+                                  FontAttributes="Bold"
+                                  TextColor="{Binding NoteColor}" />
                         </FormattedString>
                     </Label.FormattedText>
                 </Label>
                 <Label Text="{Binding FrequencyText}"
                        HorizontalOptions="Center"
                        FontSize="12"
-                       TextColor="#E8922E" />
+                       TextColor="{Binding FrequencyColor}" />
             </VerticalStackLayout>
 
             <VerticalStackLayout Grid.Column="2"
